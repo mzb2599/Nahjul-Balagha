@@ -10,7 +10,7 @@ def answer_query(
     store: Any,
     model: Any,
     limit: int = 8,
-) -> str:
+) -> dict[str, Any]:
     query = query.strip()
     if not query:
         raise ValueError("Query must not be empty.")
@@ -33,7 +33,10 @@ def answer_query(
         passages.append(f"[Passage {rank}; page {page}]\n{text}")
 
     if not passages:
-        return "No passages were retrieved from the indexed book. Use --index to index the PDF first."
+        return {
+            "answer": "No passages were retrieved from the indexed book. Use --index to index the PDF first.",
+            "sources": [],
+        }
 
     prompt = f"""You answer questions using only the supplied excerpts from Nahjul Balagha.
 The book may express an idea without using the exact words in the question. Consider
@@ -51,4 +54,13 @@ QUESTION:
     answer = getattr(response, "text", None)
     if not answer:
         raise RuntimeError("Gemini returned an empty response.")
-    return answer.strip()
+    sources = [
+        {
+            "page": (result.payload or {}).get("page"),
+            "text": (result.payload or {}).get("text", ""),
+            "score": result.score,
+        }
+        for result in results
+        if (result.payload or {}).get("text", "").strip()
+    ]
+    return {"answer": answer.strip(), "sources": sources}

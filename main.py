@@ -1,5 +1,6 @@
 import argparse
 import logging
+from typing import Any
 
 from config import get_settings
 from embeddings import LocalEmbeddings
@@ -68,10 +69,14 @@ def main() -> None:
             print_answer(query, answer)
 
 
-def print_answer(query: str, answer: str) -> None:
+def print_answer(query: str, result: dict[str, Any]) -> None:
     print("\n" + "=" * 72)
     print(f"Question\n{query}\n")
-    print(f"Answer\n{answer}")
+    print(f"Answer\n{result['answer']}")
+    sources = result.get("sources", [])
+    pages = sorted({str(source["page"]) for source in sources if source.get("page") is not None})
+    if pages:
+        print(f"\nSources: pages {', '.join(pages)}")
     print("=" * 72)
 
 

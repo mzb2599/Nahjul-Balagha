@@ -41,6 +41,24 @@ Interactive mode:
 
 To re-index after changing the PDF, run the indexing command again.
 
+## Run the web UI
+
+Start the API from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api:app --reload --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, start Vite:
+
+```powershell
+cd "UI\Nahjul Balagha"
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite. The UI proxies `/api/ask` to the FastAPI service.
+
 ## Credentials
 
 Keep real keys only in `.env`. Do not commit or share that file. Keys included in earlier code/messages should be revoked and replaced.
