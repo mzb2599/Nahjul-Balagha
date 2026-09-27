@@ -17,9 +17,19 @@ def main() -> None:
         help="Read and index the configured PDF before answering queries.",
     )
     parser.add_argument("--query", help="Ask one question and exit.")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show retrieval scores, excerpts, and informational logs.",
+    )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format="%(levelname)s: %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("qdrant_client").setLevel(logging.WARNING)
     settings = get_settings()
     embeddings = LocalEmbeddings(settings.embedding_model)
     store = QdrantStore(settings)
@@ -40,7 +50,8 @@ def main() -> None:
 
     model = create_gemini_model(settings)
     if args.query:
-        print(answer_query(args.query, embeddings, store, model))
+        answer = answer_query(args.query, embeddings, store, model)
+        print_answer(args.query, answer)
         return
 
     print("Nahjul Balagha RAG is ready. Type 'exit' to quit.")
@@ -53,8 +64,15 @@ def main() -> None:
         if query.lower() in {"exit", "quit"}:
             break
         if query:
-            print(answer_query(query, embeddings, store, model))
-            print()
+            answer = answer_query(query, embeddings, store, model)
+            print_answer(query, answer)
+
+
+def print_answer(query: str, answer: str) -> None:
+    print("\n" + "=" * 72)
+    print(f"Question\n{query}\n")
+    print(f"Answer\n{answer}")
+    print("=" * 72)
 
 
 if __name__ == "__main__":
