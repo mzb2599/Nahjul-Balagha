@@ -1,75 +1,80 @@
-# React + TypeScript + Vite
+# Nahjul Balagha AI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A web application for exploring Nahjul Balagha. Browse sermons, letters, and sayings from the configured book PDF, ask questions against the indexed text, review cited source excerpts, and save answers in your browser.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Browse and search the book's Sermons, Letters, and Sayings, with entry pages and excerpts.
+- Ask questions using retrieval-augmented generation (RAG): local `all-MiniLM-L6-v2` embeddings, a Qdrant vector collection, and Gemini answers.
+- Inspect source passages returned with an answer.
+- Save and remove answers; saved items persist in the current browser using `localStorage`.
+- Check whether the local API is online from the UI.
 
-## React Compiler
+## Requirements
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Python 3.12
+- Node.js and npm
+- Gemini API credentials and a Qdrant instance for AI question answering
 
-## Expanding the ESLint configuration
+The backend project root is the parent directory of this UI folder: `Nahjul Balagha AI/`.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Configure the backend
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+From the backend project root, create a virtual environment and install the Python dependencies:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Create a `.env` file in the backend project root and set the following values:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```dotenv
+GEMINI_API_KEY=your_gemini_api_key
+QDRANT_URL=your_qdrant_url
+QDRANT_API_KEY=your_qdrant_api_key
+```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+The backend reads the book from `Nahjul-Balagha.pdf` in the project root by default. Set `PDF_PATH` in `.env` to use a different PDF. The Qdrant collection defaults to `nahjul_balagha_ai`; override it with `QDRANT_COLLECTION` if needed.
 
+Keep real credentials in `.env` and do not commit or share them.
+
+## Index the book
+
+From the backend project root, build or refresh the searchable index:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --index
+```
+
+The first run downloads the embedding model and may take a while. Run the command again after changing the PDF. AI question answering requires a populated Qdrant collection.
+
+## Run the application
+
+Start the API from the backend project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api:app --reload --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, start the UI:
+
+```powershell
+cd "UI\Nahjul Balagha"
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite. The Vite development server proxies `/api` requests to `http://127.0.0.1:8000`, so keep the API running while using the UI. The book reader uses the configured PDF; question answering also needs the credentials and index described above.
+
+## UI scripts
+
+Run these commands from `UI\Nahjul Balagha`:
+
+```powershell
+npm run dev      # Start the Vite development server
+npm run build    # Type-check and create a production build in dist/
+npm run lint     # Run ESLint
+npm run preview  # Preview the production build locally
 ```
