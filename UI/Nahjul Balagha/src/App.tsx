@@ -1,7 +1,6 @@
 import type { FormEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowDownLeft,
   ArrowLeft,
   ArrowUpRight,
   Bookmark,
@@ -43,6 +42,13 @@ type SavedAnswer = {
 };
 
 type View = "Home" | "Ask" | "Read" | "Saved";
+type BookSectionName = "Sermons" | "Letters" | "Sayings";
+type BookEntrySummary = {
+  number: number;
+  title: string;
+  page: number;
+  excerpt: string;
+};
 
 const starterQuestions = [
   "What is wisdom?",
@@ -52,6 +58,7 @@ const starterQuestions = [
 
 function App() {
   const [view, setView] = useState<View>("Home");
+  const [readSection, setReadSection] = useState<BookSectionName>("Sermons");
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<AskResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -140,6 +147,11 @@ function App() {
     setMenuOpen(false);
   }
 
+  function openBookSection(section: BookSectionName) {
+    setReadSection(section);
+    selectView("Read");
+  }
+
   const currentSaved = saved.some((item) => item.question === query);
 
   return (
@@ -191,36 +203,24 @@ function App() {
         <div className="sidebar-label">Explore the book</div>
         <button
           className="collection-link"
-          onClick={() => {
-            setQuery("What are the central teachings in the sermons?");
-            void askQuestion("What are the central teachings in the sermons?");
-          }}
+          onClick={() => openBookSection("Sermons")}
         >
           <span className="collection-icon sermon-icon">S</span>
           <span>Sermons</span>
-          <span className="collection-count">241</span>
         </button>
         <button
           className="collection-link"
-          onClick={() => {
-            setQuery("What guidance is given in the letters?");
-            void askQuestion("What guidance is given in the letters?");
-          }}
+          onClick={() => openBookSection("Letters")}
         >
           <span className="collection-icon letter-icon">L</span>
           <span>Letters</span>
-          <span className="collection-count">79</span>
         </button>
         <button
           className="collection-link"
-          onClick={() => {
-            setQuery("What sayings offer guidance for daily life?");
-            void askQuestion("What sayings offer guidance for daily life?");
-          }}
+          onClick={() => openBookSection("Sayings")}
         >
           <span className="collection-icon saying-icon">W</span>
           <span>Sayings</span>
-          <span className="collection-count">480</span>
         </button>
 
         <div className="sidebar-bottom">
@@ -289,7 +289,10 @@ function App() {
 
         <div className="content-wrap">
           {view === "Home" && (
-            <HomeView onAsk={askQuestion} onRead={() => selectView("Read")} />
+            <HomeView
+              onAsk={askQuestion}
+              onRead={(section = "Sermons") => openBookSection(section)}
+            />
           )}
 
           {view === "Ask" && (
@@ -342,7 +345,13 @@ function App() {
             </section>
           )}
 
-          {view === "Read" && <ReadView onAsk={askQuestion} />}
+          {view === "Read" && (
+            <ReadView
+              onAsk={askQuestion}
+              activeSectionName={readSection}
+              onSelectSection={setReadSection}
+            />
+          )}
           {view === "Saved" && (
             <SavedView
               saved={saved}
@@ -478,7 +487,7 @@ function HomeView({
   onRead,
 }: {
   onAsk: (question: string) => void;
-  onRead: () => void;
+  onRead: (section?: BookSectionName) => void;
 }) {
   const [homeQuery, setHomeQuery] = useState("");
   const today = new Intl.DateTimeFormat("en", {
@@ -560,14 +569,14 @@ function HomeView({
               <span className="section-eyebrow">THE READING ROOM</span>
               <h2>Choose a path in.</h2>
             </div>
-            <button className="text-link" onClick={onRead}>
+            <button className="text-link" onClick={() => onRead()}>
               Open library <ArrowUpRight size={15} />
             </button>
           </div>
           <div className="collection-grid">
             <button
               className="collection-card collection-card-dark"
-              onClick={onRead}
+              onClick={() => onRead("Sermons")}
             >
               <span className="card-index">01 / SERMONS</span>
               <span className="collection-card-icon">
@@ -579,12 +588,12 @@ function HomeView({
                 Inner clarity.
               </strong>
               <span className="card-bottom">
-                241 sermons <ArrowUpRight size={16} />
+                Read sermons <ArrowUpRight size={16} />
               </span>
             </button>
             <button
               className="collection-card collection-card-light"
-              onClick={onRead}
+              onClick={() => onRead("Letters")}
             >
               <span className="card-index">02 / LETTERS</span>
               <span className="collection-card-icon">
@@ -596,12 +605,12 @@ function HomeView({
                 the world.
               </strong>
               <span className="card-bottom">
-                79 letters <ArrowUpRight size={16} />
+                Read letters <ArrowUpRight size={16} />
               </span>
             </button>
             <button
               className="collection-card collection-card-gold"
-              onClick={onRead}
+              onClick={() => onRead("Sayings")}
             >
               <span className="card-index">03 / SAYINGS</span>
               <span className="collection-card-icon">
@@ -613,7 +622,7 @@ function HomeView({
                 Long echoes.
               </strong>
               <span className="card-bottom">
-                480 sayings <ArrowUpRight size={16} />
+                Read sayings <ArrowUpRight size={16} />
               </span>
             </button>
           </div>
@@ -633,7 +642,7 @@ function HomeView({
             Browse the sermons, letters, and sayings. Ask a question whenever a
             passage invites a closer look.
           </p>
-          <button className="outline-button" onClick={onRead}>
+          <button className="outline-button" onClick={() => onRead()}>
             Enter the reading room <ArrowUpRight size={16} />
           </button>
           <div className="reading-meta">
@@ -768,114 +777,334 @@ function AnswerPanel({
   );
 }
 
-function ReadView({ onAsk }: { onAsk: (question: string) => void }) {
-  const [activeTab, setActiveTab] = useState("Sermons");
-  const [bookQuery, setBookQuery] = useState("");
-  const sections = [
-    {
-      name: "Sermons",
-      count: "241",
-      description:
-        "Addresses on faith, justice, the life of the community, and the nature of the world.",
-    },
-    {
-      name: "Letters",
-      count: "79",
-      description:
-        "Counsel and correspondence on leadership, duty, and the care of people.",
-    },
-    {
-      name: "Sayings",
-      count: "480",
-      description:
-        "Concise reflections on character, knowledge, conduct, and the heart.",
-    },
-  ];
-  const activeSection =
-    sections.find((section) => section.name === activeTab) ?? sections[0];
+function ReadView({
+  onAsk,
+  activeSectionName,
+  onSelectSection,
+}: {
+  onAsk: (question: string) => void;
+  activeSectionName: BookSectionName;
+  onSelectSection: (section: BookSectionName) => void;
+}) {
+  const sections: BookSectionName[] = ["Sermons", "Letters", "Sayings"];
+  const [sectionData, setSectionData] = useState<
+    Partial<
+      Record<BookSectionName, { entries: BookEntrySummary[]; error?: string }>
+    >
+  >({});
+  const [selectedEntry, setSelectedEntry] = useState<{
+    section: BookSectionName;
+    number: number;
+  } | null>(null);
+  const [entryContent, setEntryContent] = useState<{
+    section: BookSectionName;
+    number: number;
+    text?: string;
+    error?: string;
+  } | null>(null);
+  const [entrySearch, setEntrySearch] = useState("");
+  const sectionResult = sectionData[activeSectionName];
+  const entries = sectionResult?.entries ?? [];
+  const isLoadingEntries = sectionResult === undefined;
+  const entriesError = sectionResult?.error ?? "";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const section = activeSectionName.toLowerCase();
+
+    fetch(`/api/book/sections/${section}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          entries?: BookEntrySummary[];
+          detail?: string;
+        };
+        if (!response.ok)
+          throw new Error(payload.detail ?? "Could not load this section.");
+        return payload;
+      })
+      .then((payload) => {
+        const loadedEntries = payload.entries ?? [];
+        setSectionData((current) => ({
+          ...current,
+          [activeSectionName]: { entries: loadedEntries },
+        }));
+        setSelectedEntry((current) =>
+          current?.section === activeSectionName
+            ? current
+            : loadedEntries[0]
+              ? { section: activeSectionName, number: loadedEntries[0].number }
+              : null,
+        );
+      })
+      .catch((requestError: unknown) => {
+        if (requestError instanceof Error && requestError.name === "AbortError")
+          return;
+        setSectionData((current) => ({
+          ...current,
+          [activeSectionName]: {
+            entries: [],
+            error:
+              requestError instanceof Error
+                ? requestError.message
+                : "Could not reach the book reader service.",
+          },
+        }));
+      });
+
+    return () => controller.abort();
+  }, [activeSectionName]);
+
+  const visibleEntries = entries.filter((entry) => {
+    const query = entrySearch.trim().toLowerCase();
+    return (
+      !query ||
+      entry.title.toLowerCase().includes(query) ||
+      entry.excerpt.toLowerCase().includes(query)
+    );
+  });
+  const selectedNumber =
+    selectedEntry?.section === activeSectionName ? selectedEntry.number : null;
+  const activeEntry =
+    visibleEntries.find((entry) => entry.number === selectedNumber) ??
+    visibleEntries[0];
+  const activeEntryNumber = activeEntry?.number;
+  const activeEntryIndex = visibleEntries.findIndex(
+    (entry) => entry.number === activeEntryNumber,
+  );
+
+  useEffect(() => {
+    if (activeEntryNumber === undefined) return;
+
+    const controller = new AbortController();
+    const section = activeSectionName.toLowerCase();
+
+    fetch(`/api/book/sections/${section}/entries/${activeEntryNumber}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          text?: string;
+          detail?: string;
+        };
+        if (!response.ok)
+          throw new Error(payload.detail ?? "Could not open this entry.");
+        return payload;
+      })
+      .then((payload) =>
+        setEntryContent({
+          section: activeSectionName,
+          number: activeEntryNumber,
+          text: payload.text ?? "",
+        }),
+      )
+      .catch((requestError: unknown) => {
+        if (requestError instanceof Error && requestError.name === "AbortError")
+          return;
+        setEntryContent({
+          section: activeSectionName,
+          number: activeEntryNumber,
+          error:
+            requestError instanceof Error
+              ? requestError.message
+              : "Could not open this entry.",
+        });
+      });
+
+    return () => controller.abort();
+  }, [activeSectionName, activeEntryNumber]);
+
+  const entryContentIsCurrent =
+    entryContent?.section === activeSectionName &&
+    entryContent.number === activeEntryNumber;
+  const isLoadingEntry = Boolean(activeEntry && !entryContentIsCurrent);
+  const entryError = entryContentIsCurrent ? (entryContent?.error ?? "") : "";
+  const entryText = entryContentIsCurrent ? (entryContent?.text ?? "") : "";
+
   return (
     <section className="read-view">
-      <button className="back-link" onClick={() => setActiveTab("Sermons")}>
-        <ArrowDownLeft size={15} /> THE READING ROOM
-      </button>
       <div className="section-eyebrow">
         <span className="eyebrow-rule" /> THE BOOK
       </div>
       <h1 className="page-title">
-        A library of <em>living words.</em>
+        Read the words <em>as written.</em>
       </h1>
       <p className="page-intro">
-        Move between the forms of the text, or search a subject to find its
-        passages.
+        Browse the sermons, letters, and sayings, then open any entry to read
+        its text.
       </p>
       <div className="book-tabs" role="tablist" aria-label="Book sections">
         {sections.map((section) => (
           <button
-            key={section.name}
-            className={`book-tab ${activeTab === section.name ? "book-tab-active" : ""}`}
-            onClick={() => setActiveTab(section.name)}
+            key={section}
+            className={`book-tab ${activeSectionName === section ? "book-tab-active" : ""}`}
+            onClick={() => onSelectSection(section)}
             role="tab"
-            aria-selected={activeTab === section.name}
+            aria-selected={activeSectionName === section}
           >
-            <span>{section.name}</span>
-            <small>{section.count}</small>
+            {section}
+            {sectionData[section] && (
+              <small>{sectionData[section]?.entries.length}</small>
+            )}
           </button>
         ))}
       </div>
-      <div className="reader-feature">
-        <div className="reader-feature-top">
-          <span>SELECTED SECTION</span>
-          <span>NAHJUL BALAGHA</span>
-        </div>
-        <div className="reader-feature-body">
-          <div className="reader-monogram">{activeSection.name[0]}</div>
-          <div>
-            <h2>{activeSection.name}</h2>
-            <p>{activeSection.description}</p>
+      <div className="book-reader-layout">
+        <aside
+          className="entry-list-panel"
+          aria-label={`${activeSectionName} list`}
+        >
+          <label className="entry-search">
+            <Search size={16} />
+            <input
+              value={entrySearch}
+              onChange={(event) => setEntrySearch(event.target.value)}
+              placeholder={`Search ${activeSectionName.toLowerCase()}…`}
+              aria-label={`Search ${activeSectionName}`}
+            />
+            <span>{visibleEntries.length}</span>
+          </label>
+          <div
+            className="entry-list"
+            role="listbox"
+            aria-label={activeSectionName}
+          >
+            {isLoadingEntries && (
+              <div className="reader-message">
+                <LoaderCircle className="spin" size={18} /> Loading entries…
+              </div>
+            )}
+            {entriesError && (
+              <div className="reader-message reader-message-error" role="alert">
+                {entriesError}
+              </div>
+            )}
+            {!isLoadingEntries &&
+              !entriesError &&
+              visibleEntries.length === 0 && (
+                <div className="reader-message">No matching entries.</div>
+              )}
+            {visibleEntries.map((entry) => (
+              <button
+                key={entry.number}
+                className={`entry-list-item ${activeEntry?.number === entry.number ? "entry-list-item-active" : ""}`}
+                role="option"
+                aria-selected={activeEntry?.number === entry.number}
+                onClick={() =>
+                  setSelectedEntry({
+                    section: activeSectionName,
+                    number: entry.number,
+                  })
+                }
+              >
+                <span className="entry-list-item-heading">
+                  <strong>{entry.title}</strong>
+                  <small>p. {entry.page}</small>
+                </span>
+                <span className="entry-list-excerpt">{entry.excerpt}</span>
+              </button>
+            ))}
           </div>
-          <span className="reader-count">
-            {activeSection.count}
-            <small>ENTRIES</small>
-          </span>
-        </div>
-        <form
-          className="reader-search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (bookQuery.trim())
-              void onAsk(
-                `Find passages in the ${activeSection.name.toLowerCase()} about ${bookQuery.trim()}.`,
-              );
-          }}
-        >
-          <Search size={17} />
-          <input
-            value={bookQuery}
-            onChange={(event) => setBookQuery(event.target.value)}
-            placeholder={`Find a theme in ${activeSection.name.toLowerCase()}…`}
-            aria-label={`Search ${activeSection.name}`}
-          />
-          <button aria-label="Search section" type="submit">
-            <ArrowUpRight size={17} />
-          </button>
-        </form>
-      </div>
-      <div className="reader-note">
-        <BookOpen size={17} />
-        <p>
-          Choose a theme above to retrieve passages from your indexed
-          translation. Every answer includes page references so you can return
-          to the source.
-        </p>
-        <button
-          onClick={() =>
-            void onAsk(
-              `What are the central themes in the ${activeSection.name.toLowerCase()}?`,
-            )
-          }
-        >
-          Explore a theme <ArrowUpRight size={15} />
-        </button>
+        </aside>
+
+        <article className="entry-reading-panel">
+          {activeEntry ? (
+            <>
+              <header className="entry-reading-header">
+                <div>
+                  <div className="section-eyebrow">
+                    <span className="eyebrow-rule" />{" "}
+                    {activeSectionName.toUpperCase()} · PAGE {activeEntry.page}
+                  </div>
+                  <h2>{activeEntry.title}</h2>
+                </div>
+                <button
+                  className="entry-ask-button"
+                  onClick={() =>
+                    void onAsk(
+                      `Explain ${activeEntry.title} from Nahjul Balagha.`,
+                    )
+                  }
+                >
+                  <Sparkles size={15} /> Ask about this
+                </button>
+              </header>
+              <div className="entry-reading-content">
+                {isLoadingEntry && (
+                  <div className="reader-message">
+                    <LoaderCircle className="spin" size={18} /> Opening text…
+                  </div>
+                )}
+                {entryError && (
+                  <div
+                    className="reader-message reader-message-error"
+                    role="alert"
+                  >
+                    {entryError}
+                  </div>
+                )}
+                {!isLoadingEntry && !entryError && (
+                  <div className="entry-body">
+                    {entryText
+                      .split(/\n{2,}/)
+                      .filter((paragraph) => paragraph.trim())
+                      .map((paragraph, index) => (
+                        <p key={`${activeEntry.number}-${index}`}>
+                          {paragraph.trim()}
+                        </p>
+                      ))}
+                  </div>
+                )}
+              </div>
+              <footer className="entry-reading-footer">
+                <span>
+                  Peak of Eloquence edition · printed page {activeEntry.page}
+                </span>
+                <div>
+                  <button
+                    className="entry-page-button"
+                    disabled={activeEntryIndex <= 0}
+                    onClick={() => {
+                      const previous = visibleEntries[activeEntryIndex - 1];
+                      if (previous)
+                        setSelectedEntry({
+                          section: activeSectionName,
+                          number: previous.number,
+                        });
+                    }}
+                  >
+                    <ArrowLeft size={14} /> Previous
+                  </button>
+                  <button
+                    className="entry-page-button"
+                    disabled={
+                      activeEntryIndex < 0 ||
+                      activeEntryIndex >= visibleEntries.length - 1
+                    }
+                    onClick={() => {
+                      const next = visibleEntries[activeEntryIndex + 1];
+                      if (next)
+                        setSelectedEntry({
+                          section: activeSectionName,
+                          number: next.number,
+                        });
+                    }}
+                  >
+                    Next <ArrowUpRight size={14} />
+                  </button>
+                </div>
+              </footer>
+            </>
+          ) : (
+            <div className="reader-empty-state">
+              <BookOpen size={24} />
+              <p>
+                {isLoadingEntries
+                  ? "Loading the book…"
+                  : "Choose an entry to read."}
+              </p>
+            </div>
+          )}
+        </article>
       </div>
     </section>
   );
