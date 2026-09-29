@@ -15,6 +15,8 @@ import {
   LoaderCircle,
   Menu,
   MessageCircle,
+  Minus,
+  Plus,
   Search,
   Settings2,
   Share2,
@@ -792,10 +794,24 @@ function ReadView({
       Record<BookSectionName, { entries: BookEntrySummary[]; error?: string }>
     >
   >({});
-  const [selectedEntry, setSelectedEntry] = useState<{
-    section: BookSectionName;
-    number: number;
-  } | null>(null);
+  const [selectedEntries, setSelectedEntries] = useState<
+    Partial<Record<BookSectionName, number>>
+  >(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem("nahjul-reading-position") ?? "{}",
+      ) as Partial<Record<BookSectionName, number>>;
+    } catch {
+      return {};
+    }
+  });
+  const [textSize, setTextSize] = useState(() => {
+    const storedSize = Number(localStorage.getItem("nahjul-reading-text-size"));
+    return storedSize >= 14 && storedSize <= 22 ? storedSize : 16;
+  });
+  const [wideReading, setWideReading] = useState(
+    () => localStorage.getItem("nahjul-reading-wide") === "true",
+  );
   const [entryContent, setEntryContent] = useState<{
     section: BookSectionName;
     number: number;
@@ -807,6 +823,21 @@ function ReadView({
   const entries = sectionResult?.entries ?? [];
   const isLoadingEntries = sectionResult === undefined;
   const entriesError = sectionResult?.error ?? "";
+
+  useEffect(() => {
+    localStorage.setItem(
+      "nahjul-reading-position",
+      JSON.stringify(selectedEntries),
+    );
+  }, [selectedEntries]);
+
+  useEffect(() => {
+    localStorage.setItem("nahjul-reading-text-size", String(textSize));
+  }, [textSize]);
+
+  useEffect(() => {
+    localStorage.setItem("nahjul-reading-wide", String(wideReading));
+  }, [wideReading]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -828,13 +859,14 @@ function ReadView({
           ...current,
           [activeSectionName]: { entries: loadedEntries },
         }));
-        setSelectedEntry((current) =>
-          current?.section === activeSectionName
-            ? current
-            : loadedEntries[0]
-              ? { section: activeSectionName, number: loadedEntries[0].number }
-              : null,
-        );
+        setSelectedEntries((current) => ({
+          ...current,
+          [activeSectionName]: loadedEntries.some(
+            (entry) => entry.number === current[activeSectionName],
+          )
+            ? current[activeSectionName]
+            : loadedEntries[0]?.number,
+        }));
       })
       .catch((requestError: unknown) => {
         if (requestError instanceof Error && requestError.name === "AbortError")
@@ -862,8 +894,7 @@ function ReadView({
       entry.excerpt.toLowerCase().includes(query)
     );
   });
-  const selectedNumber =
-    selectedEntry?.section === activeSectionName ? selectedEntry.number : null;
+  const selectedNumber = selectedEntries[activeSectionName] ?? null;
   const activeEntry =
     visibleEntries.find((entry) => entry.number === selectedNumber) ??
     visibleEntries[0];
@@ -920,6 +951,29 @@ function ReadView({
   const entryError = entryContentIsCurrent ? (entryContent?.error ?? "") : "";
   const entryText = entryContentIsCurrent ? (entryContent?.text ?? "") : "";
 
+  function selectEntry(number: number) {
+    setSelectedEntries((current) => ({
+      ...current,
+      [activeSectionName]: number,
+    }));
+  }
+
+  function handleReaderKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === "ArrowLeft" && activeEntryIndex > 0) {
+      event.preventDefault();
+      selectEntry(visibleEntries[activeEntryIndex - 1].number);
+    }
+    if (
+      event.key === "ArrowRight" &&
+      activeEntryIndex >= 0 &&
+      activeEntryIndex < visibleEntries.length - 1
+    ) {
+      event.preventDefault();
+      selectEntry(visibleEntries[activeEntryIndex + 1].number);
+    }
+  }
+
   return (
     <section className="read-view">
       <div className="section-eyebrow">
@@ -948,7 +1002,7 @@ function ReadView({
           </button>
         ))}
       </div>
-      <div className="book-reader-layout">
+      <div className="book-reader-layout" onKeyDown={handleReaderKeyDown}>
         <aside
           className="entry-list-panel"
           aria-label={`${activeSectionName} list`}
@@ -989,12 +1043,7 @@ function ReadView({
                 className={`entry-list-item ${activeEntry?.number === entry.number ? "entry-list-item-active" : ""}`}
                 role="option"
                 aria-selected={activeEntry?.number === entry.number}
-                onClick={() =>
-                  setSelectedEntry({
-                    section: activeSectionName,
-                    number: entry.number,
-                  })
-                }
+                onClick={() => selectEntry(entry.number)}
               >
                 <span className="entry-list-item-heading">
                   <strong>{entry.title}</strong>
@@ -1017,16 +1066,53 @@ function ReadView({
                   </div>
                   <h2>{activeEntry.title}</h2>
                 </div>
-                <button
-                  className="entry-ask-button"
-                  onClick={() =>
-                    void onAsk(
-                      `Explain ${activeEntry.title} from Nahjul Balagha.`,
-                    )
-                  }
-                >
-                  <Sparkles size={15} /> Ask about this
-                </button>
+                <div className="entry-header-actions">
+                  <div
+                    className="reading-controls"
+                    aria-label="Reading settings"
+                  >
+                    <button
+                      className="reading-control-button"
+                      aria-label="Decrease text size"
+                      title="Decrease text size"
+                      disabled={textSize <= 14}
+                      onClick={() =>
+                        setTextSize((size) => Math.max(14, size - 1))
+                      }
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span aria-live="polite">{textSize}px</span>
+                    <button
+                      className="reading-control-button"
+                      aria-label="Increase text size"
+                      title="Increase text size"
+                      disabled={textSize >= 22}
+                      onClick={() =>
+                        setTextSize((size) => Math.min(22, size + 1))
+                      }
+                    >
+                      <Plus size={14} />
+                    </button>
+                    <button
+                      className={`reading-width-button ${wideReading ? "reading-width-active" : ""}`}
+                      aria-pressed={wideReading}
+                      onClick={() => setWideReading((wide) => !wide)}
+                    >
+                      {wideReading ? "Narrow" : "Wide"}
+                    </button>
+                  </div>
+                  <button
+                    className="entry-ask-button"
+                    onClick={() =>
+                      void onAsk(
+                        `Explain ${activeEntry.title} from Nahjul Balagha.`,
+                      )
+                    }
+                  >
+                    <Sparkles size={15} /> Ask about this
+                  </button>
+                </div>
               </header>
               <div className="entry-reading-content">
                 {isLoadingEntry && (
@@ -1043,7 +1129,10 @@ function ReadView({
                   </div>
                 )}
                 {!isLoadingEntry && !entryError && (
-                  <div className="entry-body">
+                  <div
+                    className={`entry-body ${wideReading ? "entry-body-wide" : ""}`}
+                    style={{ fontSize: `${textSize}px` }}
+                  >
                     {entryText
                       .split(/\n{2,}/)
                       .filter((paragraph) => paragraph.trim())
@@ -1065,11 +1154,7 @@ function ReadView({
                     disabled={activeEntryIndex <= 0}
                     onClick={() => {
                       const previous = visibleEntries[activeEntryIndex - 1];
-                      if (previous)
-                        setSelectedEntry({
-                          section: activeSectionName,
-                          number: previous.number,
-                        });
+                      if (previous) selectEntry(previous.number);
                     }}
                   >
                     <ArrowLeft size={14} /> Previous
@@ -1082,11 +1167,7 @@ function ReadView({
                     }
                     onClick={() => {
                       const next = visibleEntries[activeEntryIndex + 1];
-                      if (next)
-                        setSelectedEntry({
-                          section: activeSectionName,
-                          number: next.number,
-                        });
+                      if (next) selectEntry(next.number);
                     }}
                   >
                     Next <ArrowUpRight size={14} />
