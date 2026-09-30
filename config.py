@@ -34,15 +34,18 @@ def get_settings() -> Settings:
             + ". Copy .env.example to .env and fill in the values."
         )
 
-    pdf_path = Path(os.getenv("PDF_PATH", str(PROJECT_DIR / "Nahjul-Balagha.pdf")))
-    if not pdf_path.is_absolute():
-        pdf_path = PROJECT_DIR / pdf_path
-
     return Settings(
         gemini_api_key=required["GEMINI_API_KEY"],
         qdrant_url=required["QDRANT_URL"],
         qdrant_api_key=required["QDRANT_API_KEY"],
         collection_name=os.getenv("QDRANT_COLLECTION", "nahjul_balagha_ai"),
-        pdf_path=pdf_path,
+        pdf_path=get_pdf_path(),
         batch_size=int(os.getenv("BATCH_SIZE", "64")),
     )
+
+
+def get_pdf_path() -> Path:
+    pdf_path = Path(os.getenv("PDF_PATH", str(PROJECT_DIR / "Nahjul-Balagha.pdf")))
+    if not pdf_path.is_absolute():
+        pdf_path = PROJECT_DIR / pdf_path
+    return pdf_path
