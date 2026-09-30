@@ -1019,9 +1019,8 @@
   color: #788e73;
 }
 .book-reader-layout {
-  display: grid;
-  grid-template-columns: minmax(230px, 310px) minmax(0, 1fr);
-  min-height: 620px;
+  display: block;
+  min-height: 0;
   margin-top: 22px;
   border-top: 1px solid #dedfd5;
   border-bottom: 1px solid #dedfd5;
@@ -1029,9 +1028,8 @@
 .entry-list-panel {
   display: flex;
   min-width: 0;
-  max-height: min(74vh, 900px);
+  max-height: min(62vh, 760px);
   flex-direction: column;
-  border-right: 1px solid #dedfd5;
 }
 .entry-search {
   display: flex;
@@ -1112,7 +1110,32 @@
 .entry-reading-panel {
   display: flex;
   min-width: 0;
+  width: min(100%, 980px);
+  max-height: min(88vh, 980px);
   flex-direction: column;
+  background: var(--paper);
+  border: 1px solid #e4e3da;
+  box-shadow: 0 24px 80px rgb(19 31 23 / 28%);
+  outline: none;
+}
+.entry-overlay {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(22 32 25 / 56%);
+  backdrop-filter: blur(4px);
+  animation: overlay-in 0.18s ease both;
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .entry-reading-header {
   display: flex;
@@ -1138,6 +1161,22 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+.entry-close-button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #687468;
+  background: transparent;
+  border: 1px solid #d9ddd2;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.entry-close-button:hover {
+  color: #294631;
+  background: #e9ede4;
 }
 .reading-controls {
   display: flex;
@@ -1215,8 +1254,10 @@
 .entry-reading-content {
   overflow-y: auto;
   flex: 1;
-  min-height: 400px;
+  min-height: 0;
+  max-height: 62vh;
   padding: 25px clamp(20px, 4vw, 56px);
+  overscroll-behavior: contain;
 }
 .entry-body {
   max-width: 690px;
@@ -1695,19 +1736,20 @@
     font-size: 12px;
   }
   .book-reader-layout {
-    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
   }
   .entry-list-panel {
-    max-height: 38vh;
-    border-right: 0;
-    border-bottom: 1px solid #dedfd5;
+    max-height: 45vh;
   }
   .entry-list-item {
     padding: 10px 12px;
   }
   .entry-reading-panel {
-    min-height: 55vh;
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+  }
+  .entry-overlay {
+    padding: 12px;
   }
   .entry-reading-header {
     align-items: flex-start;
@@ -1731,7 +1773,8 @@
     font-size: 22px;
   }
   .entry-reading-content {
-    min-height: 300px;
+    max-height: none;
+    min-height: 0;
     padding: 20px 15px;
   }
   .entry-body {

@@ -812,6 +812,8 @@ function ReadView({
   const [wideReading, setWideReading] = useState(
     () => localStorage.getItem("nahjul-reading-wide") === "true",
   );
+  const [isEntryOpen, setIsEntryOpen] = useState(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const [entryContent, setEntryContent] = useState<{
     section: BookSectionName;
     number: number;
@@ -838,6 +840,16 @@ function ReadView({
   useEffect(() => {
     localStorage.setItem("nahjul-reading-wide", String(wideReading));
   }, [wideReading]);
+
+  useEffect(() => {
+    if (!isEntryOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isEntryOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -956,10 +968,16 @@ function ReadView({
       ...current,
       [activeSectionName]: number,
     }));
+    setIsEntryOpen(true);
   }
 
   function handleReaderKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setIsEntryOpen(false);
+      return;
+    }
     if (event.key === "ArrowLeft" && activeEntryIndex > 0) {
       event.preventDefault();
       selectEntry(visibleEntries[activeEntryIndex - 1].number);
@@ -991,7 +1009,10 @@ function ReadView({
           <button
             key={section}
             className={`book-tab ${activeSectionName === section ? "book-tab-active" : ""}`}
-            onClick={() => onSelectSection(section)}
+            onClick={() => {
+              setIsEntryOpen(false);
+              onSelectSection(section);
+            }}
             role="tab"
             aria-selected={activeSectionName === section}
           >
@@ -1054,139 +1075,165 @@ function ReadView({
             ))}
           </div>
         </aside>
-
-        <article className="entry-reading-panel">
-          {activeEntry ? (
-            <>
-              <header className="entry-reading-header">
-                <div>
-                  <div className="section-eyebrow">
-                    <span className="eyebrow-rule" />{" "}
-                    {activeSectionName.toUpperCase()} · PAGE {activeEntry.page}
-                  </div>
-                  <h2>{activeEntry.title}</h2>
-                </div>
-                <div className="entry-header-actions">
-                  <div
-                    className="reading-controls"
-                    aria-label="Reading settings"
-                  >
-                    <button
-                      className="reading-control-button"
-                      aria-label="Decrease text size"
-                      title="Decrease text size"
-                      disabled={textSize <= 14}
-                      onClick={() =>
-                        setTextSize((size) => Math.max(14, size - 1))
-                      }
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <span aria-live="polite">{textSize}px</span>
-                    <button
-                      className="reading-control-button"
-                      aria-label="Increase text size"
-                      title="Increase text size"
-                      disabled={textSize >= 22}
-                      onClick={() =>
-                        setTextSize((size) => Math.min(22, size + 1))
-                      }
-                    >
-                      <Plus size={14} />
-                    </button>
-                    <button
-                      className={`reading-width-button ${wideReading ? "reading-width-active" : ""}`}
-                      aria-pressed={wideReading}
-                      onClick={() => setWideReading((wide) => !wide)}
-                    >
-                      {wideReading ? "Narrow" : "Wide"}
-                    </button>
-                  </div>
-                  <button
-                    className="entry-ask-button"
-                    onClick={() =>
-                      void onAsk(
-                        `Explain ${activeEntry.title} from Nahjul Balagha.`,
-                      )
-                    }
-                  >
-                    <Sparkles size={15} /> Ask about this
-                  </button>
-                </div>
-              </header>
-              <div className="entry-reading-content">
-                {isLoadingEntry && (
-                  <div className="reader-message">
-                    <LoaderCircle className="spin" size={18} /> Opening text…
-                  </div>
-                )}
-                {entryError && (
-                  <div
-                    className="reader-message reader-message-error"
-                    role="alert"
-                  >
-                    {entryError}
-                  </div>
-                )}
-                {!isLoadingEntry && !entryError && (
-                  <div
-                    className={`entry-body ${wideReading ? "entry-body-wide" : ""}`}
-                    style={{ fontSize: `${textSize}px` }}
-                  >
-                    {entryText
-                      .split(/\n{2,}/)
-                      .filter((paragraph) => paragraph.trim())
-                      .map((paragraph, index) => (
-                        <p key={`${activeEntry.number}-${index}`}>
-                          {paragraph.trim()}
-                        </p>
-                      ))}
-                  </div>
-                )}
-              </div>
-              <footer className="entry-reading-footer">
-                <span>
-                  Peak of Eloquence edition · printed page {activeEntry.page}
-                </span>
-                <div>
-                  <button
-                    className="entry-page-button"
-                    disabled={activeEntryIndex <= 0}
-                    onClick={() => {
-                      const previous = visibleEntries[activeEntryIndex - 1];
-                      if (previous) selectEntry(previous.number);
-                    }}
-                  >
-                    <ArrowLeft size={14} /> Previous
-                  </button>
-                  <button
-                    className="entry-page-button"
-                    disabled={
-                      activeEntryIndex < 0 ||
-                      activeEntryIndex >= visibleEntries.length - 1
-                    }
-                    onClick={() => {
-                      const next = visibleEntries[activeEntryIndex + 1];
-                      if (next) selectEntry(next.number);
-                    }}
-                  >
-                    Next <ArrowUpRight size={14} />
-                  </button>
-                </div>
-              </footer>
-            </>
-          ) : (
-            <div className="reader-empty-state">
-              <BookOpen size={24} />
-              <p>
-                {isLoadingEntries
-                  ? "Loading the book…"
-                  : "Choose an entry to read."}
-              </p>
-            </div>
-          )}
-        </article>
       </div>
+
+      {isEntryOpen && activeEntry && (
+        <div
+          className="entry-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsEntryOpen(false);
+          }}
+        >
+          <article
+            className="entry-reading-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="entry-dialog-title"
+            tabIndex={-1}
+            ref={dialogRef}
+            onKeyDown={handleReaderKeyDown}
+          >
+            {activeEntry ? (
+              <>
+                <header className="entry-reading-header">
+                  <div>
+                    <div className="section-eyebrow">
+                      <span className="eyebrow-rule" />{" "}
+                      {activeSectionName.toUpperCase()} · PAGE{" "}
+                      {activeEntry.page}
+                    </div>
+                    <h2 id="entry-dialog-title">{activeEntry.title}</h2>
+                  </div>
+                  <div className="entry-header-actions">
+                    <div
+                      className="reading-controls"
+                      aria-label="Reading settings"
+                    >
+                      <button
+                        className="reading-control-button"
+                        aria-label="Decrease text size"
+                        title="Decrease text size"
+                        disabled={textSize <= 14}
+                        onClick={() =>
+                          setTextSize((size) => Math.max(14, size - 1))
+                        }
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span aria-live="polite">{textSize}px</span>
+                      <button
+                        className="reading-control-button"
+                        aria-label="Increase text size"
+                        title="Increase text size"
+                        disabled={textSize >= 22}
+                        onClick={() =>
+                          setTextSize((size) => Math.min(22, size + 1))
+                        }
+                      >
+                        <Plus size={14} />
+                      </button>
+                      <button
+                        className={`reading-width-button ${wideReading ? "reading-width-active" : ""}`}
+                        aria-pressed={wideReading}
+                        onClick={() => setWideReading((wide) => !wide)}
+                      >
+                        {wideReading ? "Narrow" : "Wide"}
+                      </button>
+                    </div>
+                    <button
+                      className="entry-ask-button"
+                      onClick={() =>
+                        void onAsk(
+                          `Explain ${activeEntry.title} from Nahjul Balagha.`,
+                        )
+                      }
+                    >
+                      <Sparkles size={15} /> Ask about this
+                    </button>
+                    <button
+                      className="entry-close-button"
+                      aria-label="Close reading overlay"
+                      title="Close"
+                      onClick={() => setIsEntryOpen(false)}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </header>
+                <div className="entry-reading-content">
+                  {isLoadingEntry && (
+                    <div className="reader-message">
+                      <LoaderCircle className="spin" size={18} /> Opening text…
+                    </div>
+                  )}
+                  {entryError && (
+                    <div
+                      className="reader-message reader-message-error"
+                      role="alert"
+                    >
+                      {entryError}
+                    </div>
+                  )}
+                  {!isLoadingEntry && !entryError && (
+                    <div
+                      className={`entry-body ${wideReading ? "entry-body-wide" : ""}`}
+                      style={{ fontSize: `${textSize}px` }}
+                    >
+                      {entryText
+                        .split(/\n{2,}/)
+                        .filter((paragraph) => paragraph.trim())
+                        .map((paragraph, index) => (
+                          <p key={`${activeEntry.number}-${index}`}>
+                            {paragraph.trim()}
+                          </p>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                <footer className="entry-reading-footer">
+                  <span>
+                    Peak of Eloquence edition · printed page {activeEntry.page}
+                  </span>
+                  <div>
+                    <button
+                      className="entry-page-button"
+                      disabled={activeEntryIndex <= 0}
+                      onClick={() => {
+                        const previous = visibleEntries[activeEntryIndex - 1];
+                        if (previous) selectEntry(previous.number);
+                      }}
+                    >
+                      <ArrowLeft size={14} /> Previous
+                    </button>
+                    <button
+                      className="entry-page-button"
+                      disabled={
+                        activeEntryIndex < 0 ||
+                        activeEntryIndex >= visibleEntries.length - 1
+                      }
+                      onClick={() => {
+                        const next = visibleEntries[activeEntryIndex + 1];
+                        if (next) selectEntry(next.number);
+                      }}
+                    >
+                      Next <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                </footer>
+              </>
+            ) : (
+              <div className="reader-empty-state">
+                <BookOpen size={24} />
+                <p>
+                  {isLoadingEntries
+                    ? "Loading the book…"
+                    : "Choose an entry to read."}
+                </p>
+              </div>
+            )}
+          </article>
+        </div>
+      )}
     </section>
   );
 }
