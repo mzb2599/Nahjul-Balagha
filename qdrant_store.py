@@ -54,6 +54,11 @@ class QdrantStore:
         embeddings: Any,
         batch_size: int,
     ) -> int:
+        point_ids_by_source: dict[str, set[str]] = {}
+        for chunk in chunks:
+            source = str(chunk["metadata"]["source"])
+            point_ids_by_source.setdefault(source, set()).add(self._point_id(chunk))
+
         for start in range(0, len(chunks), batch_size):
             batch = chunks[start:start + batch_size]
             vectors = embeddings.embed_documents([item["text"] for item in batch])
@@ -71,7 +76,40 @@ class QdrantStore:
                 wait=True,
             )
             print(f"Indexed {min(start + len(batch), len(chunks))}/{len(chunks)} chunks")
+
+        for source, current_ids in point_ids_by_source.items():
+            obsolete_ids = self._source_point_ids(source) - current_ids
+            if obsolete_ids:
+                self.client.delete(
+                    collection_name=self.settings.collection_name,
+                    points_selector=models.PointIdsList(points=list(obsolete_ids)),
+                    wait=True,
+                )
+
         return len(chunks)
+
+    def _source_point_ids(self, source: str) -> set[str]:
+        point_ids: set[str] = set()
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.settings.collection_name,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source",
+                            match=models.MatchValue(value=source),
+                        )
+                    ]
+                ),
+                limit=256,
+                with_payload=False,
+                with_vectors=False,
+                offset=offset,
+            )
+            point_ids.update(str(point.id) for point in points)
+            if offset is None:
+                return point_ids
 
     def search(self, vector: list[float], limit: int = 8):
         return self.client.search(
