@@ -814,6 +814,7 @@ function ReadView({
   );
   const [isEntryOpen, setIsEntryOpen] = useState(false);
   const dialogRef = useRef<HTMLElement | null>(null);
+  const lastTriggerRef = useRef<HTMLElement | null>(null);
   const [entryContent, setEntryContent] = useState<{
     section: BookSectionName;
     number: number;
@@ -848,6 +849,9 @@ function ReadView({
     dialogRef.current?.focus();
     return () => {
       document.body.style.overflow = previousOverflow;
+      window.requestAnimationFrame(() => {
+        lastTriggerRef.current?.focus();
+      });
     };
   }, [isEntryOpen]);
 
@@ -963,7 +967,15 @@ function ReadView({
   const entryError = entryContentIsCurrent ? (entryContent?.error ?? "") : "";
   const entryText = entryContentIsCurrent ? (entryContent?.text ?? "") : "";
 
+  function closeEntry() {
+    setIsEntryOpen(false);
+  }
+
   function selectEntry(number: number) {
+    lastTriggerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     setSelectedEntries((current) => ({
       ...current,
       [activeSectionName]: number,
@@ -975,7 +987,31 @@ function ReadView({
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.key === "Escape") {
       event.preventDefault();
-      setIsEntryOpen(false);
+      closeEntry();
+      return;
+    }
+    if (event.key === "Tab" && dialogRef.current) {
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
+      if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
       return;
     }
     if (event.key === "ArrowLeft" && activeEntryIndex > 0) {
@@ -1081,7 +1117,7 @@ function ReadView({
         <div
           className="entry-overlay"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setIsEntryOpen(false);
+            if (event.target === event.currentTarget) closeEntry();
           }}
         >
           <article
@@ -1154,7 +1190,7 @@ function ReadView({
                       className="entry-close-button"
                       aria-label="Close reading overlay"
                       title="Close"
-                      onClick={() => setIsEntryOpen(false)}
+                      onClick={closeEntry}
                     >
                       <X size={18} />
                     </button>
