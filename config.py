@@ -19,6 +19,8 @@ class Settings:
     embedding_model: str = "all-MiniLM-L6-v2"
     chat_model: str = "gemini-2.5-flash"
     vector_size: int = 384
+    allow_public_api: bool = False
+    allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "::1")
 
 
 def get_settings() -> Settings:
@@ -34,6 +36,18 @@ def get_settings() -> Settings:
             + ". Copy .env.example to .env and fill in the values."
         )
 
+    allow_public_api = os.getenv("ALLOW_PUBLIC_API", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    allowed_hosts = tuple(
+        host.strip().lower()
+        for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,::1").split(",")
+        if host.strip()
+    ) or ("localhost", "127.0.0.1", "::1")
+
     return Settings(
         gemini_api_key=required["GEMINI_API_KEY"],
         qdrant_url=required["QDRANT_URL"],
@@ -41,6 +55,8 @@ def get_settings() -> Settings:
         collection_name=os.getenv("QDRANT_COLLECTION", "nahjul_balagha_ai"),
         pdf_path=get_pdf_path(),
         batch_size=int(os.getenv("BATCH_SIZE", "64")),
+        allow_public_api=allow_public_api,
+        allowed_hosts=allowed_hosts,
     )
 
 

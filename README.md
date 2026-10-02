@@ -15,6 +15,8 @@ Copy-Item .env.example .env
 
 Edit `.env` and set your Gemini API key, Qdrant URL, and Qdrant API key. Set `PDF_PATH` to the PDF location. Alternatively, put `Nahjul-Balagha.pdf` in this folder and keep the example path.
 
+The API is intentionally private by default. Set `ALLOW_PUBLIC_API=true` only when you are deliberately exposing it beyond localhost/internal use. `ALLOWED_HOSTS` controls the trusted local hosts for the same-machine UI and local clients.
+
 The app defaults to the separate Qdrant collection `nahjul_balagha_ai`; it does not delete or modify the collection used by the older project.
 
 ## Index the PDF

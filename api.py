@@ -1,6 +1,8 @@
 from functools import lru_cache
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from book_reader import SECTION_SOURCES, get_entry, list_entries
@@ -11,6 +13,35 @@ from qdrant_store import QdrantStore
 from rag import answer_query
 
 app = FastAPI(title="Nahjul Balagha AI", version="1.0.0")
+
+
+def _request_hosts(request: Request) -> set[str]:
+    host_header = request.headers.get("host", "").split(":", 1)[0].lower().strip("[]")
+    origin_header = request.headers.get("origin", "")
+    origin_host = (urlparse(origin_header).hostname or "").strip("[]").lower()
+    forwarded_host = request.headers.get("x-forwarded-host", "")
+    forwarded_host = forwarded_host.split(",", 1)[0].split(":", 1)[0].lower().strip("[]") if forwarded_host else ""
+    client_host = (request.client.host or "").strip("[]").lower() if request.client else ""
+    return {host for host in (host_header, origin_host, forwarded_host, client_host) if host}
+
+
+@app.middleware("http")
+async def restrict_private_access(request: Request, call_next):
+    settings = get_settings()
+    if settings.allow_public_api:
+        return await call_next(request)
+
+    request_hosts = _request_hosts(request)
+    allowed_hosts = {host.lower() for host in settings.allowed_hosts}
+    if request_hosts and request_hosts.issubset(allowed_hosts):
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=403,
+        content={
+            "detail": "This API is configured for internal/private use only. Set ALLOW_PUBLIC_API=true to allow public access.",
+        },
+    )
 
 
 class AskRequest(BaseModel):
