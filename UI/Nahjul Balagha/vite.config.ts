@@ -6,6 +6,7 @@ export default defineConfig(({ mode }) => {
   const apiBaseUrl = env.VITE_API_BASE_URL ?? "";
 
   return {
+    base: mode === "production" ? "/Nahjul-Balagha/" : "/",
     plugins: [react()],
     define: {
       "process.env.VITE_API_BASE_URL": JSON.stringify(apiBaseUrl),
@@ -13,7 +14,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         "/api": {
-          target: apiBaseUrl || "https://nahjul-balagha.onrender.com",
+          target: apiBaseUrl,
           changeOrigin: true,
         },
       },

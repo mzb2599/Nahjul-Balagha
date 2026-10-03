@@ -1,7 +1,9 @@
 from functools import lru_cache
+import os
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -13,6 +15,20 @@ from qdrant_store import QdrantStore
 from rag import answer_query
 
 app = FastAPI(title="Nahjul Balagha AI", version="1.0.0")
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,https://mzb2599.github.io",
+    ).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 def _request_hosts(request: Request) -> set[str]:
