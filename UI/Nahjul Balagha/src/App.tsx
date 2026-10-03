@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import "./App.css";
 
+const API_BASE_URL = (process.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+
 type Source = {
   page?: number | string;
   text?: string;
@@ -86,7 +88,7 @@ function App() {
   }, [saved]);
 
   useEffect(() => {
-    fetch("/api/health")
+    fetch(`${API_BASE_URL}/api/health`)
       .then((response) => setApiStatus(response.ok ? "online" : "offline"))
       .catch(() => setApiStatus("offline"));
   }, []);
@@ -102,7 +104,7 @@ function App() {
     setResult(null);
 
     try {
-      const response = await fetch("/api/ask", {
+      const response = await fetch(`${API_BASE_URL}/api/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: cleanQuestion }),
@@ -859,7 +861,9 @@ function ReadView({
     const controller = new AbortController();
     const section = activeSectionName.toLowerCase();
 
-    fetch(`/api/book/sections/${section}`, { signal: controller.signal })
+    fetch(`${API_BASE_URL}/api/book/sections/${section}`, {
+      signal: controller.signal,
+    })
       .then(async (response) => {
         const payload = (await response.json()) as {
           entries?: BookEntrySummary[];
@@ -925,9 +929,12 @@ function ReadView({
     const controller = new AbortController();
     const section = activeSectionName.toLowerCase();
 
-    fetch(`/api/book/sections/${section}/entries/${activeEntryNumber}`, {
-      signal: controller.signal,
-    })
+    fetch(
+      `${API_BASE_URL}/api/book/sections/${section}/entries/${activeEntryNumber}`,
+      {
+        signal: controller.signal,
+      },
+    )
       .then(async (response) => {
         const payload = (await response.json()) as {
           text?: string;
