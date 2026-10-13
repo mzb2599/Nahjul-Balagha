@@ -5,7 +5,7 @@ A web application for exploring Nahjul Balagha. Browse sermons, letters, and say
 ## Features
 
 - Browse and search the book's Sermons, Letters, and Sayings, with entry pages and excerpts.
-- Ask questions using retrieval-augmented generation (RAG): local `all-MiniLM-L6-v2` embeddings, a Qdrant vector collection, and Gemini answers.
+- Ask questions using retrieval-augmented generation (RAG): Hugging Face `all-MiniLM-L6-v2` embeddings, a Qdrant vector collection, and Gemini answers.
 - Inspect source passages returned with an answer.
 - Save and remove answers; saved items persist in the current browser using `localStorage`.
 - Check whether the local API is online from the UI.
@@ -14,7 +14,7 @@ A web application for exploring Nahjul Balagha. Browse sermons, letters, and say
 
 - Python 3.12
 - Node.js and npm
-- Gemini API credentials and a Qdrant instance for AI question answering
+- Gemini and Hugging Face API credentials, plus a Qdrant instance, for AI question answering
 
 The backend project root is the parent directory of this UI folder: `Nahjul Balagha AI/`.
 
@@ -36,7 +36,7 @@ QDRANT_URL=your_qdrant_url
 QDRANT_API_KEY=your_qdrant_api_key
 ```
 
-The backend reads the book from `Nahjul-Balagha.pdf` in the project root by default. Set `PDF_PATH` in `.env` to use a different PDF. The Qdrant collection defaults to `nahjul_balagha_ai`; override it with `QDRANT_COLLECTION` if needed.
+The backend reads the book from `Nahjul-Balagha.pdf` in the project root by default. Set `PDF_PATH` in `.env` to use a different PDF. The Qdrant collection defaults to `nahjul_balagha_ai_gemini`; override it with `QDRANT_COLLECTION` if needed. Gemini embeddings use 768 dimensions by default.
 
 Keep real credentials in `.env` and do not commit or share them.
 
@@ -48,7 +48,7 @@ From the backend project root, build or refresh the searchable index:
 .\.venv\Scripts\python.exe main.py --index
 ```
 
-The first run downloads the embedding model and may take a while. Run the command again after changing the PDF. AI question answering requires a populated Qdrant collection.
+Indexing sends each chunk to Hugging Face Serverless Inference, so it requires internet access and is subject to the service's rate limits. Run the command again after changing the PDF. AI question answering requires a populated Qdrant collection.
 
 ## Run the application
 

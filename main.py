@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from config import get_settings
-from embeddings import LocalEmbeddings
+from embeddings import GeminiEmbeddings
 from gemini_client import create_gemini_model
 from pdf_processing import load_and_split_pdf
 from qdrant_store import QdrantStore
@@ -32,7 +32,11 @@ def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("qdrant_client").setLevel(logging.WARNING)
     settings = get_settings()
-    embeddings = LocalEmbeddings(settings.embedding_model)
+    embeddings = GeminiEmbeddings(
+        settings.embedding_model,
+        settings.gemini_api_key,
+        settings.vector_size,
+    )
     store = QdrantStore(settings)
 
     if args.index:

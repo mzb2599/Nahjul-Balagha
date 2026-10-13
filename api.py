@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from book_reader import SECTION_SOURCES, get_entry, list_entries
 from config import get_settings
-from embeddings import LocalEmbeddings
+from embeddings import GeminiEmbeddings
 from gemini_client import create_gemini_model
 from qdrant_store import QdrantStore
 from rag import answer_query
@@ -68,7 +68,11 @@ class AskRequest(BaseModel):
 def get_rag_services():
     settings = get_settings()
     return (
-        LocalEmbeddings(settings.embedding_model),
+        GeminiEmbeddings(
+            settings.embedding_model,
+            settings.gemini_api_key,
+            settings.vector_size,
+        ),
         QdrantStore(settings),
         create_gemini_model(settings),
     )

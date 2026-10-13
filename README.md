@@ -1,6 +1,6 @@
 # Nahjul Balagha AI
 
-A small command-line RAG application: it extracts PDF text, embeds chunks locally with `all-MiniLM-L6-v2`, stores vectors in Qdrant, and answers questions with Gemini.
+A small command-line RAG application: it extracts PDF text, embeds chunks with Gemini (`gemini-embedding-001`), stores vectors in Qdrant, and answers questions with Gemini (`gemini-2.5-flash`).
 
 ## Setup
 
@@ -17,7 +17,7 @@ Edit `.env` and set your Gemini API key, Qdrant URL, and Qdrant API key. Set `PD
 
 The API is intentionally private by default. Set `ALLOW_PUBLIC_API=true` only when you are deliberately exposing it beyond localhost/internal use. `ALLOWED_HOSTS` controls the trusted local hosts for the same-machine UI and local clients.
 
-The app defaults to the separate Qdrant collection `nahjul_balagha_ai`; it does not delete or modify the collection used by the older project.
+The app defaults to the separate Qdrant collection `nahjul_balagha_ai_gemini`; it does not delete or modify an older collection. Gemini embeddings use 768 dimensions by default. `EMBEDDING_MODEL` and `VECTOR_SIZE` can override these defaults, but the chosen model output dimension must match `VECTOR_SIZE`.
 
 ## Index the PDF
 
@@ -25,7 +25,7 @@ The app defaults to the separate Qdrant collection `nahjul_balagha_ai`; it does 
 .\.venv\Scripts\python.exe main.py --index
 ```
 
-Indexing is idempotent for the same file path and content: it uses stable point IDs and upserts existing chunks rather than duplicating them. The first run downloads the embedding model and may take a while.
+Indexing is idempotent for the same file path and content: it uses stable point IDs and upserts existing chunks rather than duplicating them. Gemini embedding requests require an internet connection and are subject to Gemini API quotas. Each passage is embedded as a retrieval document; searches use the retrieval query task.
 
 ## Ask a question
 
