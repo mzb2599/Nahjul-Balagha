@@ -84,65 +84,62 @@ def _clean_entry_text(text: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def get_book_catalog() -> dict[str, list[BookEntry]]:
+def get_section_entries(section: str) -> tuple[BookEntry, ...]:
+    source = SECTION_SOURCES[section]
     pdf_path = get_pdf_path()
     if not pdf_path.is_file():
         raise FileNotFoundError(f"Book PDF not found: {pdf_path}")
 
     reader = PdfReader(str(pdf_path))
-    catalog: dict[str, list[BookEntry]] = {}
+    page_texts = [
+        reader.pages[page_number - 1].extract_text() or ""
+        for page_number in range(source.first_pdf_page, source.last_pdf_page + 1)
+    ]
+    page_starts: list[int] = []
+    combined_parts: list[str] = []
+    length = 0
+    for page_text in page_texts:
+        page_starts.append(length)
+        combined_parts.append(page_text)
+        length += len(page_text) + 2
+    combined_text = "\n\n".join(combined_parts)
 
-    for section_key, source in SECTION_SOURCES.items():
-        page_texts = [
-            reader.pages[page_number - 1].extract_text() or ""
-            for page_number in range(source.first_pdf_page, source.last_pdf_page + 1)
-        ]
-        page_starts: list[int] = []
-        combined_parts: list[str] = []
-        length = 0
-        for page_text in page_texts:
-            page_starts.append(length)
-            combined_parts.append(page_text)
-            length += len(page_text) + 2
-        combined_text = "\n\n".join(combined_parts)
+    matches = []
+    seen_numbers: set[int] = set()
+    for match in source.heading_pattern.finditer(combined_text):
+        number = int(match.group(source.number_group))
+        if not 1 <= number <= source.maximum_number or number in seen_numbers:
+            continue
+        seen_numbers.add(number)
+        label = (
+            match.group(source.label_group).capitalize()
+            if source.label_group
+            else "Saying"
+        )
+        matches.append((number, label, match.start(), match.end()))
 
-        matches = []
-        seen_numbers: set[int] = set()
-        for match in source.heading_pattern.finditer(combined_text):
-            number = int(match.group(source.number_group))
-            if not 1 <= number <= source.maximum_number or number in seen_numbers:
-                continue
-            seen_numbers.add(number)
-            label = (
-                match.group(source.label_group).capitalize()
-                if source.label_group
-                else "Saying"
+    entries: list[BookEntry] = []
+    for index, (number, label, _, body_start) in enumerate(matches):
+        body_end = (
+            matches[index + 1][2]
+            if index + 1 < len(matches)
+            else len(combined_text)
+        )
+        text = _clean_entry_text(combined_text[body_start:body_end])
+        if not text:
+            continue
+        page_offset = bisect_right(page_starts, body_start) - 1
+        pdf_page = source.first_pdf_page + page_offset
+        entries.append(
+            BookEntry(
+                label=label,
+                number=number,
+                page=pdf_page - 25,
+                text=text,
             )
-            matches.append((number, label, match.start(), match.end()))
+        )
 
-        entries: list[BookEntry] = []
-        for index, (number, label, _, body_start) in enumerate(matches):
-            body_end = (
-                matches[index + 1][2]
-                if index + 1 < len(matches)
-                else len(combined_text)
-            )
-            text = _clean_entry_text(combined_text[body_start:body_end])
-            if not text:
-                continue
-            page_offset = bisect_right(page_starts, body_start) - 1
-            pdf_page = source.first_pdf_page + page_offset
-            entries.append(
-                BookEntry(
-                    label=label,
-                    number=number,
-                    page=pdf_page - 25,
-                    text=text,
-                )
-            )
-        catalog[section_key] = entries
-
-    return catalog
+    return tuple(entries)
 
 
 def list_entries(section: str) -> list[dict[str, Any]]:
@@ -153,12 +150,12 @@ def list_entries(section: str) -> list[dict[str, Any]]:
             "page": entry.page,
             "excerpt": entry.excerpt,
         }
-        for entry in get_book_catalog()[section]
+        for entry in get_section_entries(section)
     ]
 
 
 def get_entry(section: str, number: int) -> BookEntry | None:
     return next(
-        (entry for entry in get_book_catalog()[section] if entry.number == number),
+        (entry for entry in get_section_entries(section) if entry.number == number),
         None,
     )
