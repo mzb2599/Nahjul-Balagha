@@ -9,9 +9,6 @@ import {
   CircleHelp,
   Compass,
   Feather,
-  FileText,
-  History,
-  Library,
   LoaderCircle,
   Menu,
   MessageCircle,
@@ -139,6 +136,15 @@ function App() {
             { question: query, answer: result.answer, sources: result.sources },
             ...saved,
           ],
+    );
+  }
+
+  function saveSaying(question: string, answer: string, page: number) {
+    const exists = saved.some((item) => item.question === question);
+    setSaved(
+      exists
+        ? saved.filter((item) => item.question !== question)
+        : [{ question, answer, sources: [{ page, text: answer }] }, ...saved],
     );
   }
 
@@ -296,6 +302,8 @@ function App() {
           {view === "Home" && (
             <HomeView
               onAsk={askQuestion}
+              onSaveSaying={saveSaying}
+              saved={saved}
               onRead={(section = "Sermons") => openBookSection(section)}
             />
           )}
@@ -422,10 +430,10 @@ function MobileNav({
     icon: ReactNode;
     count?: number;
   }[] = [
-    { view: "Home", label: "Home", icon: <Compass /> },
-    { view: "Ask", label: "Ask", icon: <Sparkles /> },
+    { view: "Home", label: "Today", icon: <SunMedium /> },
     { view: "Read", label: "Read", icon: <BookOpen /> },
-    { view: "Saved", label: "Saved", icon: <Bookmark />, count: savedCount },
+    { view: "Saved", label: "Reflect", icon: <Feather />, count: savedCount },
+    { view: "Ask", label: "Ask", icon: <Sparkles /> },
   ];
   return (
     <nav className="mobile-tab-bar" aria-label="Mobile navigation">
@@ -489,178 +497,89 @@ function SearchForm({
 
 function HomeView({
   onAsk,
+  onSaveSaying,
+  saved,
   onRead,
 }: {
   onAsk: (question: string) => void;
+  onSaveSaying: (question: string, answer: string, page: number) => void;
+  saved: SavedAnswer[];
   onRead: (section?: BookSectionName) => void;
 }) {
-  const [homeQuery, setHomeQuery] = useState("");
   const today = new Intl.DateTimeFormat("en", {
     weekday: "long",
-    month: "long",
-    day: "2-digit",
-  })
-    .format(new Date())
-    .toUpperCase();
+  }).format(new Date());
+  const sayingQuestion = "Saying 2 · Nahjul Balagha";
+  const sayingText =
+    "Whoever adopts greed as a habit devalues himself; whoever discloses his hardship agrees to be humiliated, and whoever allows his tongue to overpower his soul debases the soul.";
+  const sayingSaved = saved.some((item) => item.question === sayingQuestion);
+
   return (
-    <>
-      <section className="welcome-row">
-        <div>
-          <div className="section-eyebrow">
-            <span className="eyebrow-rule" /> {today}
-          </div>
-          <h1 className="welcome-title">
-            A little wisdom
-            <br />
-            <em>for the day ahead.</em>
-          </h1>
-          <p className="welcome-copy">
-            Enter the words of Imam Ali through questions, reading, and
-            reflection.
-          </p>
+    <section className="today-view">
+      <header className="today-heading">
+        <div className="today-date-label">{today} · TODAY</div>
+        <h1>Wisdom in context</h1>
+        <p>One saying, read slowly.</p>
+      </header>
+
+      <article className="daily-saying">
+        <div className="daily-saying-label">SAYING OF THE DAY</div>
+        <blockquote>{sayingText}</blockquote>
+        <div className="daily-saying-source">SAYINGS · 2 · PAGE 828</div>
+        <div className="daily-saying-actions">
+          <button
+            className={sayingSaved ? "saying-saved" : ""}
+            onClick={() => onSaveSaying(sayingQuestion, sayingText, 828)}
+          >
+            <Bookmark size={16} fill={sayingSaved ? "currentColor" : "none"} />
+            {sayingSaved ? "Saved" : "Save"}
+          </button>
+          <button
+            onClick={() => void onAsk("Explain Saying 2 from Nahjul Balagha.")}
+          >
+            <Sparkles size={15} /> Ask about this
+          </button>
         </div>
-        <div className="ornament" aria-hidden="true">
-          <span>۞</span>
-          <i />
-          <i />
-          <i />
-        </div>
+      </article>
+
+      <section className="today-continue">
+        <h2>Continue reading</h2>
+        <button className="continue-reading-link" onClick={() => onRead()}>
+          <span className="continue-reading-icon">
+            <BookOpen size={19} />
+          </span>
+          <span>
+            <strong>Sermons</strong>
+            <small>Return to the text</small>
+          </span>
+          <ArrowUpRight size={17} />
+        </button>
       </section>
 
-      <section className="home-search-section" aria-label="Ask a question">
-        <div className="home-search-heading">
-          <Sparkles size={16} />
-          <span>ASK THE TEXT</span>
-          <span className="home-search-note">Answers with source passages</span>
-        </div>
-        <form
-          className="search-form home-search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void onAsk(homeQuery);
-          }}
-        >
-          <Search size={19} />
-          <input
-            value={homeQuery}
-            onChange={(event) => setHomeQuery(event.target.value)}
-            placeholder="What would you like to understand?"
-            aria-label="Ask a question"
-          />
-          <button
-            className="search-submit"
-            type="submit"
-            disabled={!homeQuery.trim()}
-            aria-label="Ask"
-          >
-            <ArrowUpRight size={19} />
-          </button>
-        </form>
-        <div className="suggestion-row">
-          <span>TRY ASKING</span>
-          {starterQuestions.map((question) => (
-            <button key={question} onClick={() => void onAsk(question)}>
-              {question}
-              <ArrowUpRight size={13} />
+      <section className="today-themes">
+        <h2>Explore by theme</h2>
+        <div className="theme-list">
+          {[
+            "Patience",
+            "Justice",
+            "Knowledge",
+            "Leadership",
+            "Death & this world",
+          ].map((theme) => (
+            <button
+              key={theme}
+              onClick={() =>
+                void onAsk(
+                  `What does Nahjul Balagha say about ${theme.toLowerCase()}?`,
+                )
+              }
+            >
+              {theme}
             </button>
           ))}
         </div>
       </section>
-
-      <section className="home-columns">
-        <div className="daily-reading">
-          <div className="section-heading">
-            <div>
-              <span className="section-eyebrow">THE READING ROOM</span>
-              <h2>Choose a path in.</h2>
-            </div>
-            <button className="text-link" onClick={() => onRead()}>
-              Open library <ArrowUpRight size={15} />
-            </button>
-          </div>
-          <div className="collection-grid">
-            <button
-              className="collection-card collection-card-dark"
-              onClick={() => onRead("Sermons")}
-            >
-              <span className="card-index">01 / SERMONS</span>
-              <span className="collection-card-icon">
-                <MessageCircle size={19} />
-              </span>
-              <strong>
-                Public counsel.
-                <br />
-                Inner clarity.
-              </strong>
-              <span className="card-bottom">
-                Read sermons <ArrowUpRight size={16} />
-              </span>
-            </button>
-            <button
-              className="collection-card collection-card-light"
-              onClick={() => onRead("Letters")}
-            >
-              <span className="card-index">02 / LETTERS</span>
-              <span className="collection-card-icon">
-                <FileText size={19} />
-              </span>
-              <strong>
-                Guidance for
-                <br />
-                the world.
-              </strong>
-              <span className="card-bottom">
-                Read letters <ArrowUpRight size={16} />
-              </span>
-            </button>
-            <button
-              className="collection-card collection-card-gold"
-              onClick={() => onRead("Sayings")}
-            >
-              <span className="card-index">03 / SAYINGS</span>
-              <span className="collection-card-icon">
-                <Feather size={19} />
-              </span>
-              <strong>
-                Brief words.
-                <br />
-                Long echoes.
-              </strong>
-              <span className="card-bottom">
-                Read sayings <ArrowUpRight size={16} />
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <aside className="continue-reading">
-          <div className="section-eyebrow">A WAY TO BEGIN</div>
-          <div className="book-glyph">
-            <BookOpen size={23} strokeWidth={1.3} />
-          </div>
-          <h2>
-            Read slowly.
-            <br />
-            <em>Return often.</em>
-          </h2>
-          <p>
-            Browse the sermons, letters, and sayings. Ask a question whenever a
-            passage invites a closer look.
-          </p>
-          <button className="outline-button" onClick={() => onRead()}>
-            Enter the reading room <ArrowUpRight size={16} />
-          </button>
-          <div className="reading-meta">
-            <span>
-              <Library size={14} /> ONE TEXT
-            </span>
-            <span>
-              <History size={14} /> MANY LIVES
-            </span>
-          </div>
-        </aside>
-      </section>
-    </>
+    </section>
   );
 }
 
