@@ -27,6 +27,7 @@ import {
 import "./App.css";
 
 const API_BASE_URL = (process.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+const ENTRY_BATCH_SIZE = 50;
 
 type Source = {
   page?: number | string;
@@ -796,6 +797,14 @@ function ReadView({
       Record<BookSectionName, { entries: BookEntrySummary[]; error?: string }>
     >
   >({});
+  const loadedSectionsRef = useRef(new Set<BookSectionName>());
+  const entryListRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const isLoadingMoreRef = useRef(false);
+  const [entryListLimit, setEntryListLimit] = useState({
+    key: "",
+    limit: ENTRY_BATCH_SIZE,
+  });
   const [selectedEntries, setSelectedEntries] = useState<
     Partial<Record<BookSectionName, number>>
   >(() => {
@@ -858,6 +867,8 @@ function ReadView({
   }, [isEntryOpen]);
 
   useEffect(() => {
+    if (loadedSectionsRef.current.has(activeSectionName)) return;
+
     const controller = new AbortController();
     const section = activeSectionName.toLowerCase();
 
@@ -875,6 +886,7 @@ function ReadView({
       })
       .then((payload) => {
         const loadedEntries = payload.entries ?? [];
+        loadedSectionsRef.current.add(activeSectionName);
         setSectionData((current) => ({
           ...current,
           [activeSectionName]: { entries: loadedEntries },
@@ -922,6 +934,43 @@ function ReadView({
   const activeEntryIndex = visibleEntries.findIndex(
     (entry) => entry.number === activeEntryNumber,
   );
+  const entryListKey = `${activeSectionName}:${entrySearch}`;
+  const requestedEntryLimit =
+    entryListLimit.key === entryListKey
+      ? entryListLimit.limit
+      : ENTRY_BATCH_SIZE;
+  const visibleEntryLimit = Math.max(
+    requestedEntryLimit,
+    activeEntryIndex >= requestedEntryLimit
+      ? Math.ceil((activeEntryIndex + 1) / ENTRY_BATCH_SIZE) * ENTRY_BATCH_SIZE
+      : requestedEntryLimit,
+  );
+  const displayedEntries = visibleEntries.slice(0, visibleEntryLimit);
+
+  useEffect(() => {
+    isLoadingMoreRef.current = false;
+    const root = entryListRef.current;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!root || !sentinel || displayedEntries.length >= visibleEntries.length)
+      return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || isLoadingMoreRef.current) return;
+        isLoadingMoreRef.current = true;
+        setEntryListLimit((current) => ({
+          key: entryListKey,
+          limit:
+            (current.key === entryListKey ? current.limit : ENTRY_BATCH_SIZE) +
+            ENTRY_BATCH_SIZE,
+        }));
+      },
+      { root, rootMargin: "160px 0px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [displayedEntries.length, entryListKey, visibleEntries.length]);
 
   useEffect(() => {
     if (activeEntryNumber === undefined) return;
@@ -1085,6 +1134,7 @@ function ReadView({
             className="entry-list"
             role="listbox"
             aria-label={activeSectionName}
+            ref={entryListRef}
           >
             {isLoadingEntries && (
               <div className="reader-message">
@@ -1101,7 +1151,7 @@ function ReadView({
               visibleEntries.length === 0 && (
                 <div className="reader-message">No matching entries.</div>
               )}
-            {visibleEntries.map((entry) => (
+            {displayedEntries.map((entry) => (
               <button
                 key={entry.number}
                 className={`entry-list-item ${activeEntry?.number === entry.number ? "entry-list-item-active" : ""}`}
@@ -1116,6 +1166,13 @@ function ReadView({
                 <span className="entry-list-excerpt">{entry.excerpt}</span>
               </button>
             ))}
+            {displayedEntries.length < visibleEntries.length && (
+              <div
+                className="entry-list-load-sentinel"
+                ref={loadMoreSentinelRef}
+                aria-hidden="true"
+              />
+            )}
           </div>
         </aside>
       </div>

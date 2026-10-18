@@ -1081,6 +1081,9 @@
   background: #e8ebe2;
   box-shadow: inset 2px 0 #61785f;
 }
+.entry-list-load-sentinel {
+  height: 1px;
+}
 .entry-list-item-heading {
   display: flex;
   align-items: center;
