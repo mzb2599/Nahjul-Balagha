@@ -1,6 +1,6 @@
 # Nahjul Balagha AI
 
-A small command-line RAG application: it extracts PDF text, embeds chunks with Gemini (`gemini-embedding-001`), stores vectors in Qdrant, and answers questions with Gemini (`gemini-2.5-flash`).
+A small RAG application for reading Nahjul Balagha and asking it questions: it extracts PDF text, embeds chunks with Gemini (`gemini-embedding-001`), stores vectors in Qdrant, and answers questions with Gemini (`gemini-2.5-flash`). A mobile-first React reader ("Sage") ships in `UI/Nahjul Balagha`, and a FastAPI service exposes the book and the AI.
 
 ## Setup
 
@@ -45,6 +45,8 @@ To re-index after changing the PDF, run the indexing command again.
 
 ## Run the web UI
 
+The UI is a mobile-first React app ("Sage") with Home, Section, Reader, Ask AI, and Saved screens. On desktop it appears in a phone frame; on phones it fills the screen.
+
 Start the API from the project root:
 
 ```powershell
@@ -59,7 +61,23 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The UI proxies `/api/ask` to the FastAPI service.
+Open the local URL printed by Vite. Vite proxies `/api` to `http://127.0.0.1:8000` when `VITE_API_BASE_URL` is unset, so the reader works as long as the API is running. Question answering also needs the credentials and index described above.
+
+Reading preferences, bookmarks, and progress are stored in the browser under the `sage` localStorage key.
+
+## HTTP API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | Liveness check. |
+| `GET` | `/api/sections` | Section metadata (title, palette, canonical topic count). |
+| `GET` | `/api/sections/{slug}/topics` | Topics for `sermons`, `letters`, or `sayings`, with summaries and reading times. |
+| `GET` | `/api/topics/{id}` | A full topic (`1-1` = Sermon 1, `2-3` = Letter 3, `3-2` = Saying 2), split into paragraphs plus a key idea. |
+| `POST` | `/api/ask` | Ask a question. Body: `{"question": "...", "sectionId"?: 1-3, "topicId"?: "3-2"}`. The legacy `query` field is still accepted. Answers come with sources that include `sectionId`, `topicId`, `label`, and the printed `page` where possible. |
+| `GET` | `/api/book/sections/{section}` | Legacy entry list. |
+| `GET` | `/api/book/sections/{section}/entries/{number}` | Legacy single entry. |
+
+Source page numbers in `/api/ask` are mapped from the Qdrant payload's PDF page index to the book's printed page number and the nearest topic.
 
 ## Credentials
 

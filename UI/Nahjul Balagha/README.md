@@ -1,34 +1,37 @@
-# Nahjul Balagha AI
+# Nahjul Balagha · Sage UI
 
-A web application for exploring Nahjul Balagha. Browse sermons, letters, and sayings from the configured book PDF, ask questions against the indexed text, review cited source excerpts, and save answers in your browser.
+A mobile-first reader and AI companion for Nahjul Balagha. Browse the book's three collections (Sermons, Letters, Sayings), read topic by topic, and ask questions that are answered only from the book, with sources you can open.
 
-## Features
+## Experience
 
-- Browse and search the book's Sermons, Letters, and Sayings, with entry pages and excerpts.
-- Ask questions using retrieval-augmented generation (RAG): Hugging Face `all-MiniLM-L6-v2` embeddings, a Qdrant vector collection, and Gemini answers.
-- Inspect source passages returned with an answer.
-- Save and remove answers; saved items persist in the current browser using `localStorage`.
-- Check whether the local API is online from the UI.
+- **Home** — a continue-reading card, three section covers with per-section progress, an "Ask the book" card, and a daily saying.
+- **Section** — gradient cover with parallax artwork, stat trio (topics, total reading time, completion), and a topic timeline with "up next" and completed states.
+- **Reader** — serif reading view with a drop cap, key-idea callout, reading progress, bookmark, paper/sepia/night themes, 16–24px text size, and previous/next navigation.
+- **Ask AI** — context-aware chat. Asking from a section or the reader focuses the answer on what you are reading, and each source card links back to the topic it came from.
+- **Saved** — bookmarked topics stored on the device.
+
+Reading preferences, bookmarks, completion, and the last topic read persist in `localStorage` under the `sage` key. Reduced-motion preferences are respected.
 
 ## Requirements
 
 - Python 3.12
 - Node.js and npm
-- Gemini and Hugging Face API credentials, plus a Qdrant instance, for AI question answering
+- Gemini and Qdrant credentials, plus an indexed collection, for Ask AI
 
 The backend project root is the parent directory of this UI folder: `Nahjul Balagha AI/`.
 
 ## Configure the backend
 
-From the backend project root, create a virtual environment and install the Python dependencies:
+From the backend project root:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Create a `.env` file in the backend project root and set the following values:
+Fill in `.env`:
 
 ```dotenv
 GEMINI_API_KEY=your_gemini_api_key
@@ -36,19 +39,15 @@ QDRANT_URL=your_qdrant_url
 QDRANT_API_KEY=your_qdrant_api_key
 ```
 
-The backend reads the book from `Nahjul-Balagha.pdf` in the project root by default. Set `PDF_PATH` in `.env` to use a different PDF. The Qdrant collection defaults to `nahjul_balagha_ai_gemini`; override it with `QDRANT_COLLECTION` if needed. Gemini embeddings use 768 dimensions by default.
-
-Keep real credentials in `.env` and do not commit or share them.
+The backend reads `Nahjul-Balagha.pdf` from the project root by default; set `PDF_PATH` to use another file. The Qdrant collection defaults to `nahjul_balagha_ai_gemini`. Keep real credentials in `.env` and never commit them.
 
 ## Index the book
-
-From the backend project root, build or refresh the searchable index:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py --index
 ```
 
-Indexing sends each chunk to Hugging Face Serverless Inference, so it requires internet access and is subject to the service's rate limits. Run the command again after changing the PDF. AI question answering requires a populated Qdrant collection.
+Indexing sends each chunk to Gemini embeddings, so it needs internet access and is subject to API quotas. Run it again after changing the PDF.
 
 ## Run the application
 
@@ -66,11 +65,18 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The Vite development server proxies `/api` requests to `http://127.0.0.1:8000`, so keep the API running while using the UI. The book reader uses the configured PDF; question answering also needs the credentials and index described above.
+Open the local URL printed by Vite. The dev server proxies `/api` to `http://127.0.0.1:8000` unless `VITE_API_BASE_URL` is set (see `.env.production` for the deployed API). Without the API, reading cannot load; without credentials and an index, Ask AI cannot answer.
+
+## API used by this UI
+
+- `GET /api/sections`
+- `GET /api/sections/{slug}/topics`
+- `GET /api/topics/{id}`
+- `POST /api/ask` with `{ question, sectionId?, topicId? }`
 
 ## UI scripts
 
-Run these commands from `UI\Nahjul Balagha`:
+Run these from `UI\Nahjul Balagha`:
 
 ```powershell
 npm run dev      # Start the Vite development server

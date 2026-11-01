@@ -69,6 +69,43 @@ SECTION_SOURCES = {
     ),
 }
 
+# Section identity used by the Sage UI. The palette follows the design document:
+# dawn amber for sermons, deep teal for letters, and violet starlight for sayings.
+SECTION_META: dict[str, dict[str, Any]] = {
+    "sermons": {
+        "id": 1,
+        "title": "Sermons",
+        "description": (
+            "Public addresses on God, justice, leadership, and the human condition."
+        ),
+        "color": "#f5a524",
+        "g1": "#ffb347",
+        "g2": "#b45309",
+    },
+    "letters": {
+        "id": 2,
+        "title": "Letters",
+        "description": (
+            "Letters and instructions written to rulers, governors, and companions."
+        ),
+        "color": "#14919b",
+        "g1": "#19a7b0",
+        "g2": "#0b3c49",
+    },
+    "sayings": {
+        "id": 3,
+        "title": "Sayings",
+        "description": (
+            "Short, concentrated wisdom on character, knowledge, and the world."
+        ),
+        "color": "#7c6cf0",
+        "g1": "#8b7cf6",
+        "g2": "#2a1f7a",
+    },
+}
+
+SECTION_SLUG_BY_ID = {meta["id"]: slug for slug, meta in SECTION_META.items()}
+
 
 def _clean_entry_text(text: str) -> str:
     lines = text.splitlines()
@@ -159,3 +196,132 @@ def get_entry(section: str, number: int) -> BookEntry | None:
         (entry for entry in get_section_entries(section) if entry.number == number),
         None,
     )
+
+
+def _reading_minutes(text: str) -> int:
+    return max(1, round(len(text.split()) / 200))
+
+
+def _paragraphs(text: str) -> list[str]:
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()]
+    if len(blocks) > 1:
+        return blocks
+
+    # Some PDF pages extract as one dense block. Group sentences so the reader
+    # still gets breathing room between paragraphs.
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+    if len(sentences) <= 2:
+        return [" ".join(text.split())] if text.strip() else []
+    grouped: list[str] = []
+    for start in range(0, len(sentences), 3):
+        grouped.append(" ".join(sentences[start:start + 3]))
+    return grouped
+
+
+def _key_idea(text: str) -> str:
+    candidates = re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+    meaningful = [
+        sentence.strip()
+        for sentence in candidates[:12]
+        if 40 <= len(sentence.strip()) <= 240
+    ]
+    if not meaningful:
+        return ""
+    return max(meaningful, key=len)
+
+
+def section_overview() -> list[dict[str, Any]]:
+    """Cheap section metadata; does not parse the PDF."""
+    return [
+        {
+            "slug": slug,
+            "title": meta["title"],
+            "description": meta["description"],
+            "id": meta["id"],
+            "color": meta["color"],
+            "g1": meta["g1"],
+            "g2": meta["g2"],
+            "count": SECTION_SOURCES[slug].maximum_number,
+        }
+        for slug, meta in SECTION_META.items()
+    ]
+
+
+def topic_id_for(section: str, number: int) -> str:
+    return f"{SECTION_META[section]['id']}-{number}"
+
+
+def list_topics(section: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": topic_id_for(section, entry.number),
+            "number": entry.number,
+            "title": entry.title,
+            "summary": entry.excerpt,
+            "page": entry.page,
+            "minutes": _reading_minutes(entry.text),
+        }
+        for entry in get_section_entries(section)
+    ]
+
+
+def parse_topic_id(topic_id: str) -> tuple[str, int] | None:
+    prefix, _, number = topic_id.partition("-")
+    if not prefix.isdigit() or not number.isdigit():
+        return None
+    section = SECTION_SLUG_BY_ID.get(int(prefix))
+    if section is None:
+        return None
+    return section, int(number)
+
+
+def get_topic(topic_id: str) -> dict[str, Any] | None:
+    parsed = parse_topic_id(topic_id)
+    if parsed is None:
+        return None
+    section, number = parsed
+    entry = get_entry(section, number)
+    if entry is None:
+        return None
+    return {
+        "id": topic_id,
+        "sectionId": SECTION_META[section]["id"],
+        "section": SECTION_META[section]["title"],
+        "sectionSlug": section,
+        "number": entry.number,
+        "title": entry.title,
+        "page": entry.page,
+        "minutes": _reading_minutes(entry.text),
+        "paragraphs": _paragraphs(entry.text),
+        "keyIdeas": _key_idea(entry.text),
+        "text": entry.text,
+    }
+
+
+def resolve_pdf_page(pdf_page_index: int) -> dict[str, Any] | None:
+    """Map a 0-based PyPDF page index from a vector payload to a book topic."""
+    if pdf_page_index < 0:
+        return None
+    printed_page = pdf_page_index + 1 - 25
+    for slug, source in SECTION_SOURCES.items():
+        if not source.first_pdf_page <= pdf_page_index + 1 <= source.last_pdf_page:
+            continue
+        result: dict[str, Any] = {
+            "sectionId": SECTION_META[slug]["id"],
+            "section": SECTION_META[slug]["title"],
+            "page": printed_page,
+        }
+        entries = get_section_entries(slug)
+        if not entries:
+            return result
+        nearest = min(entries, key=lambda entry: abs(entry.page - printed_page))
+        if abs(nearest.page - printed_page) <= 3:
+            result.update(
+                {
+                    "topicId": topic_id_for(slug, nearest.number),
+                    "label": nearest.title,
+                    "page": nearest.page,
+                }
+            )
+        return result
+    return None
