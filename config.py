@@ -19,6 +19,9 @@ class Settings:
     embedding_model: str = "gemini-embedding-001"
     chat_model: str = "gemini-2.5-flash"
     vector_size: int = 768
+    answer_limit: int = 8
+    gemini_timeout_seconds: int = 60
+    gemini_max_retries: int = 3
     allow_public_api: bool = False
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "::1")
 
@@ -56,7 +59,11 @@ def get_settings() -> Settings:
         pdf_path=get_pdf_path(),
         batch_size=int(os.getenv("BATCH_SIZE", "64")),
         embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001"),
+        chat_model=os.getenv("CHAT_MODEL", "gemini-2.5-flash"),
         vector_size=int(os.getenv("VECTOR_SIZE", "768")),
+        answer_limit=int(os.getenv("ANSWER_LIMIT", "8")),
+        gemini_timeout_seconds=int(os.getenv("GEMINI_TIMEOUT_SECONDS", "60")),
+        gemini_max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "3")),
         allow_public_api=allow_public_api,
         allowed_hosts=allowed_hosts,
     )

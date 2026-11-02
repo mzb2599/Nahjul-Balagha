@@ -65,6 +65,35 @@ Open the local URL printed by Vite. Vite proxies `/api` to `http://127.0.0.1:800
 
 Reading preferences, bookmarks, and progress are stored in the browser under the `sage` localStorage key.
 
+## Deploy the API to Render
+
+The UI in `.env.production` points at `https://nahjul-balagha.onrender.com`. The repository includes `render.yaml`, which runs:
+
+```text
+uvicorn api:app --host 0.0.0.0 --port $PORT
+```
+
+In the Render dashboard, set at minimum `GEMINI_API_KEY`, `QDRANT_URL`, and `QDRANT_API_KEY`. For the public UI, keep `ALLOW_PUBLIC_API=true` and list the site in `CORS_ORIGINS`.
+
+Two deployment details matter for Ask AI:
+
+- **Redeploy after API changes.** A stale Render deployment can reject the UI's current request body with a `422` or fail the answer with a `500`. Push to `master` and confirm the Render deploy finished.
+- **Free instances sleep.** The first request after idling can take 30–60 seconds. The API warms its Qdrant/Gemini clients at startup, retries transient upstream failures, and the UI waits up to two minutes before showing an error.
+
+The API accepts both `{"question": "..."}` (current) and `{"query": "..."}` (legacy) and returns `503` with `Retry-After` for temporary Gemini/Qdrant failures.
+
+### Troubleshooting Ask AI
+
+- **`503` "The book database is unavailable"** — the API cannot reach Qdrant. Qdrant Cloud free clusters can be paused or deleted after inactivity, and the endpoint then resets TLS connections. Check it directly:
+
+  ```powershell
+  curl.exe "$env:QDRANT_URL/collections" -H "api-key: $env:QDRANT_API_KEY"
+  ```
+
+  If that connection is reset, create a new Qdrant cluster, update `QDRANT_URL` and `QDRANT_API_KEY` locally and on Render, then re-run `python main.py --index`.
+- **`422` "rejected the request"** — the Render API is older than the UI. Redeploy the latest `master`.
+- **`500` / connection reset** — inspect the Render logs. The API now retries transient Gemini/Qdrant failures and logs the failing upstream.
+
 ## HTTP API
 
 | Method | Path | Purpose |

@@ -1748,6 +1748,13 @@
   }
 }
 
+.chat-hint {
+  margin: 6px 2px 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 .source-cards {
   display: grid;
   gap: 6px;

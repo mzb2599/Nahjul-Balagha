@@ -1,6 +1,9 @@
+from contextlib import asynccontextmanager
 from functools import lru_cache
 import logging
 import os
+import threading
+import time
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
@@ -21,11 +24,22 @@ from book_reader import (
 from config import get_settings
 from embeddings import GeminiEmbeddings
 from gemini_client import create_gemini_model
-from qdrant_store import QdrantStore
+from qdrant_store import QdrantStore, QdrantUnavailableError
 from rag import answer_query
+from resilience import is_transient
 
-app = FastAPI(title="Nahjul Balagha AI", version="1.0.0")
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Warm the RAG services in the background so the first Ask request does not
+    # pay for Qdrant/Gemini client construction (important on Render cold starts).
+    threading.Thread(target=_warm_up_services, name="rag-warmup", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Nahjul Balagha AI", version="1.0.0", lifespan=lifespan)
 cors_origins = [
     origin.strip().rstrip("/")
     for origin in os.getenv(
@@ -118,10 +132,22 @@ def get_rag_services():
             settings.embedding_model,
             settings.gemini_api_key,
             settings.vector_size,
+            timeout_seconds=settings.gemini_timeout_seconds,
+            max_retries=settings.gemini_max_retries,
         ),
         QdrantStore(settings),
         create_gemini_model(settings),
     )
+
+
+def _warm_up_services() -> None:
+    try:
+        _, store, _ = get_rag_services()
+        logger.info("RAG warm-up complete; %d indexed passages.", store.count())
+    except Exception:
+        logger.warning(
+            "RAG warm-up failed; the first Ask request will retry.", exc_info=True
+        )
 
 
 @app.get("/api/health")
@@ -207,6 +233,8 @@ def ask(request: AskRequest):
     question = request.resolved_question()
     if not question:
         raise HTTPException(status_code=422, detail="A question is required.")
+    settings = get_settings()
+    started = time.perf_counter()
     try:
         embeddings, store, model = get_rag_services()
         if store.count() == 0:
@@ -214,19 +242,49 @@ def ask(request: AskRequest):
                 status_code=503,
                 detail="The book index is empty. Run `python main.py --index` first.",
             )
-        return answer_query(
+        result = answer_query(
             question,
             embeddings,
             store,
             model,
+            limit=settings.answer_limit,
             context=_reader_context(request),
             source_resolver=_resolve_source,
         )
+        logger.info(
+            "Answered question in %.1fs with %d sources.",
+            time.perf_counter() - started,
+            len(result.get("sources", [])),
+        )
+        return result
     except HTTPException:
         raise
+    except QdrantUnavailableError as error:
+        logger.exception(
+            "Qdrant unavailable after %.1fs", time.perf_counter() - started
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The book database is unavailable. The server's Qdrant cluster may "
+                "be paused, deleted, or misconfigured. Please try again later."
+            ),
+            headers={"Retry-After": "30"},
+        ) from error
     except Exception as error:
-        logger.exception("Ask request failed")
-        public = get_settings().allow_public_api
+        logger.exception("Ask request failed after %.1fs", time.perf_counter() - started)
+        public = settings.allow_public_api
+        if is_transient(error):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "The answer service is temporarily unavailable. Please try again "
+                    "in a few seconds."
+                    if public
+                    else f"Temporary upstream error: {error}"
+                ),
+                headers={"Retry-After": "5"},
+            ) from error
         raise HTTPException(
             status_code=500,
             detail=(

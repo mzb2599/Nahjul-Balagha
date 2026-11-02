@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { askBook } from "./api";
 import type { AskContext, AskSource } from "./types";
 
@@ -26,8 +26,18 @@ function prefersReducedMotion() {
 export function useSageChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [typing, setTyping] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [error, setError] = useState("");
   const [streamingId, setStreamingId] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    if (!typing) return;
+    // Render free instances sleep when idle. After a few seconds, tell the
+    // reader that the server is waking up instead of looking frozen.
+    const timer = window.setTimeout(() => setSlow(true), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [typing]);
 
   useEffect(() => {
     if (!streamingId) return;
@@ -54,9 +64,11 @@ export function useSageChat() {
 
   async function send(question: string, context?: AskContext) {
     const clean = question.trim();
-    if (!clean || typing) return;
+    if (!clean || typing || inFlight.current) return;
 
+    inFlight.current = true;
     setError("");
+    setSlow(false);
     setMessages((current) => [
       ...current,
       { id: nextMessageId(), role: "user", text: clean },
@@ -89,19 +101,25 @@ export function useSageChat() {
           : "Sage could not answer that question.",
       );
     } finally {
+      inFlight.current = false;
       setTyping(false);
+      setSlow(false);
     }
   }
 
   function reset() {
+    inFlight.current = false;
     setMessages([]);
     setError("");
+    setTyping(false);
+    setSlow(false);
     setStreamingId(null);
   }
 
   return {
     messages,
     typing,
+    slow,
     error,
     send,
     reset,

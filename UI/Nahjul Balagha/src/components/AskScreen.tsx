@@ -214,6 +214,12 @@ export function AskScreen({
                 <span />
                 <span />
               </div>
+              {chat.slow && (
+                <p className="chat-hint">
+                  Waking the archive… the free server can take up to a minute to
+                  answer.
+                </p>
+              )}
             </div>
           )}
 

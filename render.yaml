@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: nahjul-balagha
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      # The Render API is public; CORS still restricts which sites may call it.
+      - key: ALLOW_PUBLIC_API
+        value: "true"
+      - key: ALLOWED_HOSTS
+        value: nahjul-balagha.onrender.com
+      - key: CORS_ORIGINS
+        value: https://mzb2599.github.io,http://localhost:5173
+      - key: QDRANT_COLLECTION
+        value: nahjul_balagha_ai_gemini
+      - key: GEMINI_TIMEOUT_SECONDS
+        value: "60"
+      - key: GEMINI_MAX_RETRIES
+        value: "3"
+      - key: ANSWER_LIMIT
+        value: "8"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false

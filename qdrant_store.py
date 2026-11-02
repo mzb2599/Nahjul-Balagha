@@ -1,9 +1,15 @@
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 from qdrant_client import QdrantClient, models
 
 from config import Settings
+from resilience import call_with_retry
+
+
+class QdrantUnavailableError(RuntimeError):
+    """Raised when the configured Qdrant cluster cannot be reached."""
 
 
 class QdrantStore:
@@ -14,11 +20,28 @@ class QdrantStore:
             api_key=settings.qdrant_api_key,
             timeout=60,
         )
-        self._ensure_collection()
+        try:
+            self._ensure_collection()
+        except ValueError:
+            raise
+        except Exception as error:
+            host = urlsplit(settings.qdrant_url).hostname or settings.qdrant_url
+            raise QdrantUnavailableError(
+                f"Qdrant is unreachable at {host}. Check that the cluster is running "
+                "and that QDRANT_URL and QDRANT_API_KEY are correct. If the cluster "
+                "was paused or deleted, create a new one, update the environment "
+                "variables, and re-run `python main.py --index`."
+            ) from error
 
     def _ensure_collection(self) -> None:
-        if self.client.collection_exists(self.settings.collection_name):
-            info = self.client.get_collection(self.settings.collection_name)
+        if call_with_retry(
+            lambda: self.client.collection_exists(self.settings.collection_name),
+            label="Qdrant collection check",
+        ):
+            info = call_with_retry(
+                lambda: self.client.get_collection(self.settings.collection_name),
+                label="Qdrant collection info",
+            )
             vectors = info.config.params.vectors
             size = getattr(vectors, "size", None)
             if size is not None and size != self.settings.vector_size:
@@ -29,12 +52,15 @@ class QdrantStore:
                 )
             return
 
-        self.client.create_collection(
-            collection_name=self.settings.collection_name,
-            vectors_config=models.VectorParams(
-                size=self.settings.vector_size,
-                distance=models.Distance.COSINE,
+        call_with_retry(
+            lambda: self.client.create_collection(
+                collection_name=self.settings.collection_name,
+                vectors_config=models.VectorParams(
+                    size=self.settings.vector_size,
+                    distance=models.Distance.COSINE,
+                ),
             ),
+            label="Qdrant collection create",
         )
 
     @staticmethod
@@ -112,15 +138,22 @@ class QdrantStore:
                 return point_ids
 
     def search(self, vector: list[float], limit: int = 8):
-        return self.client.search(
-            collection_name=self.settings.collection_name,
-            query_vector=vector,
-            limit=limit,
-            with_payload=True,
+        return call_with_retry(
+            lambda: self.client.search(
+                collection_name=self.settings.collection_name,
+                query_vector=vector,
+                limit=limit,
+                with_payload=True,
+            ),
+            label="Qdrant search",
         )
 
     def count(self) -> int:
-        return self.client.count(
-            collection_name=self.settings.collection_name,
-            exact=True,
-        ).count
+        response = call_with_retry(
+            lambda: self.client.count(
+                collection_name=self.settings.collection_name,
+                exact=True,
+            ),
+            label="Qdrant count",
+        )
+        return response.count
