@@ -47,18 +47,32 @@ export function AskScreen({
 }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement | null>(null);
+  const answerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  const lastMessage = chat.messages[chat.messages.length - 1];
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-      block: "end",
-    });
-  }, [chat.messages, chat.typing]);
+    const behavior = prefersReducedMotion() ? "auto" : "smooth";
+
+    if (lastMessage?.role === "sage") {
+      // Land on the start of the answer so it is readable. The sources sit
+      // below it and remain reachable by scrolling.
+      answerRef.current?.scrollIntoView({ behavior, block: "start" });
+      return;
+    }
+
+    // A question was just asked (or Sage is still thinking): follow to the
+    // bottom so the question and thinking state are in view.
+    endRef.current?.scrollIntoView({ behavior, block: "end" });
+    // Deliberately keyed to the turn id rather than the messages array: the
+    // array changes on every streamed character, and re-scrolling then would
+    // push the answer out of view again.
+  }, [lastMessage?.id, lastMessage?.role, chat.typing, chat.slow]);
 
   const suggestions = context ? READING_SUGGESTIONS : HOME_SUGGESTIONS;
   const empty = chat.messages.length === 0 && !chat.typing && !chat.error;
@@ -122,9 +136,14 @@ export function AskScreen({
         )}
 
         <div className="chat-log" aria-live="polite">
-          {chat.messages.map((message) => (
+          {chat.messages.map((message, index) => (
             <div
               key={message.id}
+              ref={
+                index === chat.messages.length - 1 && message.role === "sage"
+                  ? answerRef
+                  : undefined
+              }
               className={`chat-turn chat-${message.role}`}
             >
               {message.role === "sage" && (

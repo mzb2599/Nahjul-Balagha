@@ -1643,6 +1643,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  scroll-margin-top: 4px;
+  scroll-margin-bottom: 12px;
 }
 
 .chat-user {
