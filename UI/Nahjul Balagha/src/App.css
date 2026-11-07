@@ -970,6 +970,11 @@
   gap: 12px;
 }
 
+.scroll-sentinel {
+  height: 1px;
+  margin-top: 8px;
+}
+
 .skeleton-row {
   height: 88px;
   border-radius: 20px;

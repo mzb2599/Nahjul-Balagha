@@ -18,6 +18,22 @@ export type Topic = {
   minutes: number;
 };
 
+export type TopicPage = {
+  topics: Topic[];
+  total: number;
+  offset: number;
+  limit: number | null;
+  hasMore: boolean;
+  nextOffset: number | null;
+};
+
+export type BootstrapPayload = {
+  sections: Section[];
+  pageSize: number;
+  topicPages: Record<string, TopicPage>;
+  topicDetails: Record<string, TopicDetail>;
+};
+
 export type TopicDetail = Topic & {
   sectionId: number;
   section: string;
@@ -25,6 +41,10 @@ export type TopicDetail = Topic & {
   paragraphs: string[];
   keyIdeas: string;
   text: string;
+  position: number | null;
+  total: number;
+  prevId: string | null;
+  nextId: string | null;
 };
 
 export type AskSource = {

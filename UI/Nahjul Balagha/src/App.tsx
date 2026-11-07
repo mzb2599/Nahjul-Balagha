@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { fetchSections } from "./api";
+import {
+  fetchSections,
+  prefetchInitialContent,
+  prefetchTopicDetails,
+} from "./api";
 import { useSageChat } from "./chat";
 import { AskScreen } from "./components/AskScreen";
 import { BottomNav } from "./components/Chrome";
@@ -47,8 +51,26 @@ function App() {
         setLoading(false);
       });
 
+    // Start warming the collections immediately instead of waiting for the
+    // (much cheaper) sections request to finish first.
+    prefetchInitialContent().catch(() => {
+      // Best-effort; screens fall back to their normal loading states.
+    });
+
     return () => controller.abort();
   }, [attempt]);
+
+  // Opening the "continue reading" card should also be instant.
+  useEffect(() => {
+    if (state.last) prefetchTopicDetails([state.last]);
+  }, [state.last]);
+
+  // Saved topics should open without a loading state too.
+  useEffect(() => {
+    if (state.saved.length > 0) {
+      prefetchTopicDetails(state.saved.map((topic) => topic.id));
+    }
+  }, [state.saved]);
 
   const screen = stack[stack.length - 1];
   const activeSection =

@@ -1,9 +1,11 @@
 import type {
   AskResponse,
   AskSource,
+  BootstrapPayload,
   Section,
   Topic,
   TopicDetail,
+  TopicPage,
 } from "./types";
 
 const API_BASE_URL = (process.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
@@ -154,46 +156,210 @@ export async function fetchSections(signal?: AbortSignal): Promise<Section[]> {
   return payload.sections ?? [];
 }
 
-const topicsCache = new Map<number, Promise<Topic[]>>();
+export const TOPIC_PAGE_SIZE = 12;
+const DETAIL_PREFETCH_LIMIT = 6;
 
-export function fetchTopics(
+export type SectionTopicSnapshot = {
+  topics: Topic[];
+  total: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+};
+
+type TopicPageResponse = {
+  topics?: Topic[];
+  count?: number;
+  total?: number;
+  offset?: number;
+  limit?: number | null;
+  hasMore?: boolean;
+  nextOffset?: number | null;
+};
+
+const topicPageCache = new Map<string, Promise<TopicPage>>();
+const sectionTopicSnapshots = new Map<number, SectionTopicSnapshot>();
+
+function pageKey(sectionId: number, offset: number, limit: number): string {
+  return `${sectionId}:${offset}:${limit}`;
+}
+
+function mergeSectionSnapshot(
+  sectionId: number,
+  page: TopicPage,
+  reset: boolean,
+): SectionTopicSnapshot {
+  const existing = sectionTopicSnapshots.get(sectionId);
+
+  // Re-requesting an earlier page (for example after remounting the section)
+  // must not shrink a list the reader already scrolled through.
+  if (
+    existing &&
+    !reset &&
+    page.offset === 0 &&
+    existing.topics.length >= page.topics.length
+  ) {
+    return existing;
+  }
+
+  const topics =
+    reset || !existing || page.offset === 0
+      ? page.topics
+      : (() => {
+          const seen = new Set(existing.topics.map((topic) => topic.id));
+          return [
+            ...existing.topics,
+            ...page.topics.filter((topic) => !seen.has(topic.id)),
+          ];
+        })();
+
+  const base = reset ? undefined : existing;
+  const snapshot: SectionTopicSnapshot = {
+    topics,
+    total: page.total || base?.total || topics.length,
+    hasMore: page.hasMore,
+    nextOffset: page.hasMore
+      ? Math.max(base?.nextOffset ?? 0, page.nextOffset ?? 0)
+      : null,
+  };
+  sectionTopicSnapshots.set(sectionId, snapshot);
+  return snapshot;
+}
+
+export function getCachedSectionTopics(
+  sectionId: number,
+): SectionTopicSnapshot | null {
+  return sectionTopicSnapshots.get(sectionId) ?? null;
+}
+
+/**
+ * Load one page of a collection. The first page is normally already seeded by
+ * `prefetchInitialContent`, so opening a collection renders instantly; later
+ * pages are requested as the reader scrolls.
+ */
+export function fetchTopicPage(
   sectionId: number,
   slug: string,
+  offset = 0,
+  limit = TOPIC_PAGE_SIZE,
   force = false,
-): Promise<Topic[]> {
-  if (force) topicsCache.delete(sectionId);
-  const cached = topicsCache.get(sectionId);
+): Promise<TopicPage> {
+  const key = pageKey(sectionId, offset, limit);
+  if (force) {
+    topicPageCache.delete(key);
+    if (offset === 0) sectionTopicSnapshots.delete(sectionId);
+  }
+  const cached = topicPageCache.get(key);
   if (cached) return cached;
 
-  const promise = request<{ topics?: Topic[] }>(
-    `/api/sections/${slug}/topics`,
+  const promise = request<TopicPageResponse>(
+    `/api/sections/${slug}/topics?offset=${offset}&limit=${limit}`,
   )
-    .then((payload) => payload.topics ?? [])
+    .then((payload) => {
+      const page: TopicPage = {
+        topics: payload.topics ?? [],
+        total: payload.total ?? payload.count ?? 0,
+        offset: payload.offset ?? offset,
+        limit: payload.limit ?? limit,
+        hasMore: Boolean(payload.hasMore),
+        nextOffset: payload.nextOffset ?? null,
+      };
+      mergeSectionSnapshot(sectionId, page, force);
+      prefetchTopicDetails(page.topics.slice(0, DETAIL_PREFETCH_LIMIT).map((topic) => topic.id));
+      return page;
+    })
     .catch((error: unknown) => {
-      topicsCache.delete(sectionId);
+      topicPageCache.delete(key);
       throw error;
     });
 
-  topicsCache.set(sectionId, promise);
+  topicPageCache.set(key, promise);
   return promise;
 }
 
 const topicCache = new Map<string, Promise<TopicDetail>>();
+const topicDetails = new Map<string, TopicDetail>();
+
+export function getCachedTopic(topicId: string): TopicDetail | null {
+  return topicDetails.get(topicId) ?? null;
+}
 
 export function fetchTopic(topicId: string, force = false): Promise<TopicDetail> {
   if (force) topicCache.delete(topicId);
   const cached = topicCache.get(topicId);
   if (cached) return cached;
 
-  const promise = request<TopicDetail>(`/api/topics/${topicId}`).catch(
-    (error: unknown) => {
+  const promise = request<TopicDetail>(`/api/topics/${topicId}`)
+    .then((detail) => {
+      topicDetails.set(detail.id, detail);
+      return detail;
+    })
+    .catch((error: unknown) => {
       topicCache.delete(topicId);
       throw error;
-    },
-  );
+    });
 
   topicCache.set(topicId, promise);
   return promise;
+}
+
+const detailPrefetches = new Set<string>();
+
+/**
+ * Warm the detail cache for topic cards so tapping one does not show a loading
+ * state. Best-effort: failures are ignored and retried by `fetchTopic`.
+ */
+export function prefetchTopicDetails(topicIds: string[]): void {
+  const ids = [...new Set(topicIds)]
+    .filter((id) => !topicCache.has(id) && !detailPrefetches.has(id))
+    .slice(0, 50);
+  if (ids.length === 0) return;
+
+  ids.forEach((id) => detailPrefetches.add(id));
+  request<{ topics?: TopicDetail[] }>(
+    `/api/topics?ids=${encodeURIComponent(ids.join(","))}`,
+  )
+    .then((payload) => {
+      for (const detail of payload.topics ?? []) {
+        topicDetails.set(detail.id, detail);
+        topicCache.set(detail.id, Promise.resolve(detail));
+      }
+    })
+    .catch(() => {
+      // Prefetch is an optimization only; the reader will request it on demand.
+    })
+    .finally(() => {
+      ids.forEach((id) => detailPrefetches.delete(id));
+    });
+}
+
+/**
+ * Fetch sections plus the first page of each collection in one request and
+ * seed the caches so later navigation is instant.
+ */
+export async function prefetchInitialContent(): Promise<void> {
+  const payload = await request<BootstrapPayload>("/api/bootstrap");
+  const pageSize = payload.pageSize || TOPIC_PAGE_SIZE;
+
+  for (const section of payload.sections ?? []) {
+    const page = payload.topicPages?.[section.slug];
+    if (!page) continue;
+    const limit = page.limit ?? pageSize;
+    const normalized: TopicPage = {
+      ...page,
+      limit,
+      total: page.total ?? page.topics.length,
+    };
+    mergeSectionSnapshot(section.id, normalized, false);
+    topicPageCache.set(
+      pageKey(section.id, normalized.offset, limit),
+      Promise.resolve(normalized),
+    );
+  }
+
+  for (const [id, detail] of Object.entries(payload.topicDetails ?? {})) {
+    topicDetails.set(id, detail);
+    topicCache.set(id, Promise.resolve(detail));
+  }
 }
 
 export function askBook(payload: {

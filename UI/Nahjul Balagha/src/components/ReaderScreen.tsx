@@ -15,12 +15,15 @@ import {
   Sunrise,
   X,
 } from "lucide-react";
-import { fetchTopic, fetchTopics } from "../api";
+import {
+  fetchTopic,
+  getCachedTopic,
+  prefetchTopicDetails,
+} from "../api";
 import type {
   AskContext,
   ReadingTheme,
   Section,
-  Topic,
   TopicDetail,
 } from "../types";
 import { IconButton } from "./Chrome";
@@ -62,8 +65,9 @@ export function ReaderScreen({
   setSize: (size: number) => void;
   setTheme: (theme: ReadingTheme) => void;
 }) {
-  const [detail, setDetail] = useState<TopicDetail | null>(null);
-  const [topics, setTopics] = useState<Topic[] | null>(null);
+  const [detail, setDetail] = useState<TopicDetail | null>(() =>
+    getCachedTopic(topicId),
+  );
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -94,20 +98,19 @@ export function ReaderScreen({
         );
       });
 
-    if (section) {
-      fetchTopics(section.id, section.slug)
-        .then((loaded) => {
-          if (active) setTopics(loaded);
-        })
-        .catch(() => {
-          if (active) setTopics(null);
-        });
-    }
-
     return () => {
       active = false;
     };
-  }, [attempt, remember, section, topicId]);
+  }, [attempt, remember, topicId]);
+
+  // Keep the next and previous topics warm so the dock buttons feel instant.
+  useEffect(() => {
+    if (!detail) return;
+    const neighbours = [detail.prevId, detail.nextId].filter(
+      (id): id is string => Boolean(id),
+    );
+    if (neighbours.length > 0) prefetchTopicDetails(neighbours);
+  }, [detail]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -118,13 +121,10 @@ export function ReaderScreen({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen]);
 
-  const index = topics?.findIndex((topic) => topic.id === topicId) ?? -1;
-  const previous = index > 0 ? topics?.[index - 1] : undefined;
-  const next =
-    topics && index >= 0 && index < topics.length - 1
-      ? topics[index + 1]
-      : undefined;
-  const total = topics?.length ?? 0;
+  const total = detail?.total ?? section?.count ?? 0;
+  const index = detail?.position ? detail.position - 1 : -1;
+  const previousId = detail?.prevId ?? null;
+  const nextId = detail?.nextId ?? null;
   const saved = isSaved(topicId);
 
   function handleScroll(event: UIEvent<HTMLDivElement>) {
@@ -142,7 +142,7 @@ export function ReaderScreen({
     if (!detail) return;
     markDone(detail.id);
     doneRef.current = true;
-    if (next) onChangeTopic(next.id);
+    if (nextId) onChangeTopic(nextId);
     else onBack();
   }
 
@@ -273,9 +273,9 @@ export function ReaderScreen({
                 onClick={completeAndContinue}
               >
                 <span>
-                  {next ? "Finish & next topic" : "Finish this collection"}
+                  {nextId ? "Finish & next topic" : "Finish this collection"}
                 </span>
-                {next ? <ArrowRight size={18} /> : <Check size={18} />}
+                {nextId ? <ArrowRight size={18} /> : <Check size={18} />}
               </button>
               <p>
                 {isDone(topicId)
@@ -290,8 +290,8 @@ export function ReaderScreen({
       <nav className="reader-dock" aria-label="Topic navigation">
         <IconButton
           label="Previous topic"
-          disabled={!previous}
-          onClick={() => previous && onChangeTopic(previous.id)}
+          disabled={!previousId}
+          onClick={() => previousId && onChangeTopic(previousId)}
         >
           <ChevronLeft size={20} />
         </IconButton>
@@ -311,8 +311,8 @@ export function ReaderScreen({
         </button>
         <IconButton
           label="Next topic"
-          disabled={!next}
-          onClick={() => next && onChangeTopic(next.id)}
+          disabled={!nextId}
+          onClick={() => nextId && onChangeTopic(nextId)}
         >
           <ChevronRight size={20} />
         </IconButton>

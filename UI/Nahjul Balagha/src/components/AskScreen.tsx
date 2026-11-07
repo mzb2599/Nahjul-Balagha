@@ -8,7 +8,7 @@ import {
   Sparkles,
   SquarePen,
 } from "lucide-react";
-import { sourceKey } from "../api";
+import { prefetchTopicDetails, sourceKey } from "../api";
 import type { SageChat } from "../chat";
 import type { AskContext, AskSource, Section } from "../types";
 import { IconButton, Orb } from "./Chrome";
@@ -53,6 +53,18 @@ export function AskScreen({
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Warm every citable topic so opening a source card is instant. The joined
+  // ids keep this from running on every typewriter tick.
+  const sourceTopicKey = chat.messages
+    .flatMap((message) => message.sources ?? [])
+    .map((source) => source.topicId)
+    .filter((id): id is string => Boolean(id))
+    .join(",");
+
+  useEffect(() => {
+    if (sourceTopicKey) prefetchTopicDetails(sourceTopicKey.split(","));
+  }, [sourceTopicKey]);
 
   const lastMessage = chat.messages[chat.messages.length - 1];
 
