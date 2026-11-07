@@ -1,6 +1,6 @@
 from bisect import bisect_right
 from dataclasses import dataclass
-from functools import lru_cache
+from threading import Lock
 import re
 from typing import Any
 
@@ -106,6 +106,13 @@ SECTION_META: dict[str, dict[str, Any]] = {
 
 SECTION_SLUG_BY_ID = {meta["id"]: slug for slug, meta in SECTION_META.items()}
 
+# Pagination defaults for the paginated topic endpoints. The first page is served
+# by /api/bootstrap so the UI never waits on a cold PDF parse when a collection is
+# opened, and the rest is streamed in as the reader scrolls.
+DEFAULT_PAGE_SIZE = 12
+MAX_PAGE_SIZE = 100
+DEFAULT_PREFETCH_DETAILS = 4
+
 
 def _clean_entry_text(text: str) -> str:
     lines = text.splitlines()
@@ -120,8 +127,25 @@ def _clean_entry_text(text: str) -> str:
     ).strip()
 
 
-@lru_cache(maxsize=1)
+_ENTRY_CACHE: dict[str, tuple[BookEntry, ...]] = {}
+_SECTION_LOCKS = {slug: Lock() for slug in SECTION_SOURCES}
+
+
 def get_section_entries(section: str) -> tuple[BookEntry, ...]:
+    """Parse a collection once, even when warm-up and a request race."""
+    cached = _ENTRY_CACHE.get(section)
+    if cached is not None:
+        return cached
+
+    with _SECTION_LOCKS[section]:
+        cached = _ENTRY_CACHE.get(section)
+        if cached is None:
+            cached = _parse_section_entries(section)
+            _ENTRY_CACHE[section] = cached
+        return cached
+
+
+def _parse_section_entries(section: str) -> tuple[BookEntry, ...]:
     source = SECTION_SOURCES[section]
     pdf_path = get_pdf_path()
     if not pdf_path.is_file():
@@ -251,18 +275,50 @@ def topic_id_for(section: str, number: int) -> str:
     return f"{SECTION_META[section]['id']}-{number}"
 
 
-def list_topics(section: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": topic_id_for(section, entry.number),
-            "number": entry.number,
-            "title": entry.title,
-            "summary": entry.excerpt,
-            "page": entry.page,
-            "minutes": _reading_minutes(entry.text),
-        }
-        for entry in get_section_entries(section)
-    ]
+def _topic_summary(section: str, entry: BookEntry) -> dict[str, Any]:
+    return {
+        "id": topic_id_for(section, entry.number),
+        "number": entry.number,
+        "title": entry.title,
+        "summary": entry.excerpt,
+        "page": entry.page,
+        "minutes": _reading_minutes(entry.text),
+    }
+
+
+def list_topics(
+    section: str,
+    offset: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    entries = get_section_entries(section)
+    if limit is None:
+        window = entries[max(0, offset):]
+    else:
+        window = entries[max(0, offset): max(0, offset) + max(0, limit)]
+    return [_topic_summary(section, entry) for entry in window]
+
+
+def topic_page(
+    section: str,
+    offset: int = 0,
+    limit: int = DEFAULT_PAGE_SIZE,
+) -> dict[str, Any]:
+    """Return one page of topic summaries plus paging metadata."""
+    entries = get_section_entries(section)
+    total = len(entries)
+    start = min(max(0, offset), total)
+    stop = min(total, start + max(0, limit))
+    window = entries[start:stop]
+    has_more = stop < total
+    return {
+        "topics": [_topic_summary(section, entry) for entry in window],
+        "total": total,
+        "offset": start,
+        "limit": limit,
+        "hasMore": has_more,
+        "nextOffset": stop if has_more else None,
+    }
 
 
 def parse_topic_id(topic_id: str) -> tuple[str, int] | None:
@@ -275,16 +331,16 @@ def parse_topic_id(topic_id: str) -> tuple[str, int] | None:
     return section, int(number)
 
 
-def get_topic(topic_id: str) -> dict[str, Any] | None:
-    parsed = parse_topic_id(topic_id)
-    if parsed is None:
-        return None
-    section, number = parsed
-    entry = get_entry(section, number)
-    if entry is None:
-        return None
+def _topic_detail(section: str, entry: BookEntry) -> dict[str, Any]:
+    entries = get_section_entries(section)
+    index = next(
+        (position for position, item in enumerate(entries) if item.number == entry.number),
+        -1,
+    )
+    previous = entries[index - 1] if index > 0 else None
+    following = entries[index + 1] if 0 <= index < len(entries) - 1 else None
     return {
-        "id": topic_id,
+        "id": topic_id_for(section, entry.number),
         "sectionId": SECTION_META[section]["id"],
         "section": SECTION_META[section]["title"],
         "sectionSlug": section,
@@ -295,6 +351,59 @@ def get_topic(topic_id: str) -> dict[str, Any] | None:
         "paragraphs": _paragraphs(entry.text),
         "keyIdeas": _key_idea(entry.text),
         "text": entry.text,
+        # Neighbour references let the reader navigate without downloading the
+        # whole collection just to know what comes next.
+        "position": index + 1 if index >= 0 else None,
+        "total": len(entries),
+        "prevId": topic_id_for(section, previous.number) if previous else None,
+        "nextId": topic_id_for(section, following.number) if following else None,
+    }
+
+
+def get_topic(topic_id: str) -> dict[str, Any] | None:
+    parsed = parse_topic_id(topic_id)
+    if parsed is None:
+        return None
+    section, number = parsed
+    entry = get_entry(section, number)
+    if entry is None:
+        return None
+    return _topic_detail(section, entry)
+
+
+def get_topic_details(topic_ids: list[str]) -> list[dict[str, Any]]:
+    """Resolve several topic details at once for client-side prefetching."""
+    details: list[dict[str, Any]] = []
+    for topic_id in topic_ids:
+        detail = get_topic(topic_id)
+        if detail is not None:
+            details.append(detail)
+    return details
+
+
+def initial_bundle(
+    page_size: int = DEFAULT_PAGE_SIZE,
+    detail_count: int = DEFAULT_PREFETCH_DETAILS,
+) -> dict[str, Any]:
+    """Sections plus the first page (and a few details) of every collection.
+
+    The frontend requests this once after the shell loads so opening a collection
+    or its first topics is instant, while later pages stream in on scroll.
+    """
+    pages: dict[str, Any] = {}
+    details: dict[str, Any] = {}
+    for slug in SECTION_SOURCES:
+        page = topic_page(slug, 0, page_size)
+        pages[slug] = page
+        for topic in page["topics"][:detail_count]:
+            detail = get_topic(topic["id"])
+            if detail is not None:
+                details[detail["id"]] = detail
+    return {
+        "sections": section_overview(),
+        "pageSize": page_size,
+        "topicPages": pages,
+        "topicDetails": details,
     }
 
 

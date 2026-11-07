@@ -6,20 +6,25 @@ import threading
 import time
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from book_reader import (
+    MAX_PAGE_SIZE,
     SECTION_META,
     SECTION_SOURCES,
     get_entry,
+    get_section_entries,
     get_topic,
+    get_topic_details,
+    initial_bundle,
     list_entries,
     list_topics,
     resolve_pdf_page,
     section_overview,
+    topic_page,
 )
 from config import get_settings
 from embeddings import GeminiEmbeddings
@@ -33,9 +38,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Warm the RAG services in the background so the first Ask request does not
-    # pay for Qdrant/Gemini client construction (important on Render cold starts).
+    # Warm the RAG services and the parsed book in the background so the first
+    # reader/Ask request does not pay for cold construction or a PDF parse
+    # (important on Render cold starts).
     threading.Thread(target=_warm_up_services, name="rag-warmup", daemon=True).start()
+    threading.Thread(target=_warm_up_book, name="book-warmup", daemon=True).start()
     yield
 
 
@@ -83,6 +90,25 @@ async def restrict_private_access(request: Request, call_next):
             "detail": "This API is configured for internal/private use only. Set ALLOW_PUBLIC_API=true to allow public access.",
         },
     )
+
+
+BOOK_CACHE_PATHS = ("/api/sections", "/api/topics", "/api/bootstrap")
+
+
+@app.middleware("http")
+async def cache_book_reads(request: Request, call_next):
+    """Let browsers reuse the parsed book across reloads and navigations."""
+    response = await call_next(request)
+    if (
+        request.method == "GET"
+        and response.status_code == 200
+        and request.url.path.startswith(BOOK_CACHE_PATHS)
+    ):
+        response.headers.setdefault(
+            "Cache-Control",
+            "public, max-age=300, stale-while-revalidate=86400",
+        )
+    return response
 
 
 class AskRequest(BaseModel):
@@ -150,6 +176,18 @@ def _warm_up_services() -> None:
         )
 
 
+def _warm_up_book() -> None:
+    """Parse each collection once so the first section request is cheap."""
+    try:
+        for slug in SECTION_SOURCES:
+            entries = get_section_entries(slug)
+            logger.info("Book warm-up: %s parsed (%d entries).", slug, len(entries))
+    except Exception:
+        logger.warning(
+            "Book warm-up failed; the first reader request will retry.", exc_info=True
+        )
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -160,12 +198,40 @@ def get_sections():
     return {"sections": section_overview()}
 
 
+@app.get("/api/bootstrap")
+def get_bootstrap(
+    page_size: int = Query(12, ge=1, le=MAX_PAGE_SIZE),
+    detail_count: int = Query(4, ge=0, le=24),
+):
+    """Sections plus the first page of every collection for instant opening."""
+    try:
+        return initial_bundle(page_size=page_size, detail_count=detail_count)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @app.get("/api/sections/{section}/topics")
-def get_section_topics(section: str):
+def get_section_topics(
+    section: str,
+    offset: int = Query(0, ge=0),
+    limit: int | None = Query(None, ge=1, le=MAX_PAGE_SIZE),
+):
     if section not in SECTION_SOURCES:
         raise HTTPException(status_code=404, detail="Book section not found.")
     try:
-        topics = list_topics(section)
+        if limit is None:
+            topics = list_topics(section, offset=offset)
+            total = len(get_section_entries(section))
+            page = {
+                "topics": topics,
+                "total": total,
+                "offset": offset,
+                "limit": None,
+                "hasMore": False,
+                "nextOffset": None,
+            }
+        else:
+            page = topic_page(section, offset=offset, limit=limit)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     meta = SECTION_META[section]
@@ -178,9 +244,27 @@ def get_section_topics(section: str):
             "g1": meta["g1"],
             "g2": meta["g2"],
         },
-        "count": len(topics),
-        "topics": topics,
+        "count": page["total"],
+        "topics": page["topics"],
+        "total": page["total"],
+        "offset": page["offset"],
+        "limit": page["limit"],
+        "hasMore": page["hasMore"],
+        "nextOffset": page["nextOffset"],
     }
+
+
+@app.get("/api/topics")
+def get_book_topics(
+    ids: str = Query(..., description="Comma-separated topic ids, e.g. 1-1,1-2"),
+):
+    """Batched topic details used to pre-warm the reader before a click."""
+    topic_ids = [part.strip() for part in ids.split(",") if part.strip()][:50]
+    try:
+        details = get_topic_details(topic_ids)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"topics": details}
 
 
 @app.get("/api/topics/{topic_id}")
