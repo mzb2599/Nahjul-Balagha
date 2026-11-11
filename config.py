@@ -17,6 +17,8 @@ class Settings:
     pdf_path: Path
     batch_size: int = 64
     embedding_model: str = "gemini-embedding-001"
+    embedding_batch_size: int = 64
+    embedding_requests_per_minute: int = 0
     chat_model: str = "gemini-2.5-flash"
     vector_size: int = 768
     answer_limit: int = 8
@@ -59,6 +61,10 @@ def get_settings() -> Settings:
         pdf_path=get_pdf_path(),
         batch_size=int(os.getenv("BATCH_SIZE", "64")),
         embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001"),
+        embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "64")),
+        embedding_requests_per_minute=int(
+            os.getenv("EMBEDDING_REQUESTS_PER_MINUTE", "0")
+        ),
         chat_model=os.getenv("CHAT_MODEL", "gemini-2.5-flash"),
         vector_size=int(os.getenv("VECTOR_SIZE", "768")),
         answer_limit=int(os.getenv("ANSWER_LIMIT", "8")),

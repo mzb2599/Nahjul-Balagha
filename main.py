@@ -2,12 +2,32 @@ import argparse
 import logging
 from typing import Any
 
+from book_reader import resolve_pdf_page
 from config import get_settings
 from embeddings import GeminiEmbeddings
 from gemini_client import create_gemini_model
 from pdf_processing import load_and_split_pdf
 from qdrant_store import QdrantStore
 from rag import answer_query
+
+
+def enrich_chunk_metadata(chunks: list[dict[str, Any]]) -> None:
+    """Attach section/topic identity to each chunk at index time.
+
+    Existing collections indexed before this metadata existed still work: the
+    query pipeline falls back to resolving the PDF page at answer time.
+    """
+    for chunk in chunks:
+        page = chunk["metadata"].get("page")
+        if not isinstance(page, int):
+            continue
+        resolved = resolve_pdf_page(page)
+        if not resolved:
+            continue
+        for key in ("sectionId", "topicId", "label", "section"):
+            value = resolved.get(key)
+            if value is not None:
+                chunk["metadata"][key] = value
 
 
 def main() -> None:
@@ -36,6 +56,8 @@ def main() -> None:
         settings.embedding_model,
         settings.gemini_api_key,
         settings.vector_size,
+        batch_size=settings.embedding_batch_size,
+        requests_per_minute=settings.embedding_requests_per_minute,
     )
     store = QdrantStore(settings)
 
@@ -43,7 +65,23 @@ def main() -> None:
         chunks = load_and_split_pdf(settings.pdf_path)
         if not chunks:
             raise RuntimeError(f"No extractable text found in {settings.pdf_path}")
-        store.upsert_chunks(chunks, embeddings, settings.batch_size)
+        enrich_chunk_metadata(chunks)
+        try:
+            store.upsert_chunks(chunks, embeddings, settings.batch_size)
+        except Exception as error:
+            message = str(error)
+            if "RESOURCE_EXHAUSTED" not in message and "429" not in message:
+                raise
+            try:
+                saved = store.count()
+            except Exception:
+                saved = "some"
+            print(
+                "\nGemini's embedding quota is exhausted for now. "
+                f"Progress is saved ({saved} chunks in {settings.collection_name!r}).\n"
+                "Re-run `python main.py --index` later to continue from where it stopped."
+            )
+            raise SystemExit(1) from error
         print(f"Indexed {len(chunks)} chunks into {settings.collection_name}.")
 
     point_count = store.count()

@@ -1,11 +1,19 @@
 import logging
 import random
+import re
 import time
 from typing import Callable, TypeVar
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+# Gemini/Google APIs put a suggested delay in the error body. Prefer it over a
+# blind exponential backoff, especially for per-minute quota limits.
+_RETRY_DELAY_RE = re.compile(
+    r"retry(?:Delay['\"]?\s*[:=]\s*['\"]?|\s+in\s+)([\d.]+)\s*s",
+    re.IGNORECASE,
+)
 
 # Statuses that indicate a temporary upstream problem and are safe to retry.
 TRANSIENT_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
@@ -74,12 +82,32 @@ def is_transient(error: BaseException) -> bool:
     return any(hint in message for hint in TRANSIENT_MESSAGES)
 
 
+def _suggested_delay(error: BaseException) -> float | None:
+    match = _RETRY_DELAY_RE.search(str(error))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _format_delay(seconds: float) -> str:
+    if seconds < 120:
+        return f"{seconds:.0f} seconds"
+    minutes = seconds / 60
+    if minutes < 120:
+        return f"{minutes:.0f} minutes"
+    return f"{minutes / 60:.1f} hours"
+
+
 def call_with_retry(
     func: Callable[[], T],
     *,
     attempts: int = 3,
     base_delay: float = 1.0,
     max_delay: float = 8.0,
+    max_retry_wait: float = 120.0,
     label: str = "request",
 ) -> T:
     """Call a blocking operation, retrying transient upstream failures with jitter."""
@@ -90,8 +118,22 @@ def call_with_retry(
         except Exception as error:
             if attempt >= attempts or not is_transient(error):
                 raise
-            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
-            delay *= 0.75 + random.random() * 0.5
+            suggested = _suggested_delay(error)
+            if suggested is not None and suggested > max_retry_wait:
+                # e.g. a daily quota reset: retrying inside this run cannot
+                # succeed, so surface it instead of sleeping/wasting attempts.
+                logger.error(
+                    "%s is rate limited for another %s. Stopping instead of "
+                    "retrying; any saved progress will be reused on the next run.",
+                    label,
+                    _format_delay(suggested),
+                )
+                raise
+            if suggested is not None:
+                delay = min(max_delay, suggested + 0.5)
+            else:
+                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+                delay *= 0.75 + random.random() * 0.5
             logger.warning(
                 "%s failed (attempt %d/%d): %s. Retrying in %.1fs.",
                 label,

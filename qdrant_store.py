@@ -7,6 +7,22 @@ from qdrant_client import QdrantClient, models
 from config import Settings
 from resilience import call_with_retry
 
+# Bumped whenever the stored payload gains fields the retrieval pipeline needs.
+# Points written with the current version are skipped on the next indexing run,
+# which lets an interrupted (e.g. quota-limited) index resume where it stopped.
+SCHEMA_VERSION = 2
+PAYLOAD_FIELDS = (
+    "text",
+    "page",
+    "chunk",
+    "source",
+    "sectionId",
+    "topicId",
+    "label",
+    "section",
+    "schemaVersion",
+)
+
 
 class QdrantUnavailableError(RuntimeError):
     """Raised when the configured Qdrant cluster cannot be reached."""
@@ -85,57 +101,113 @@ class QdrantStore:
             source = str(chunk["metadata"]["source"])
             point_ids_by_source.setdefault(source, set()).add(self._point_id(chunk))
 
-        for start in range(0, len(chunks), batch_size):
-            batch = chunks[start:start + batch_size]
-            vectors = embeddings.embed_documents([item["text"] for item in batch])
-            points = [
-                models.PointStruct(
-                    id=self._point_id(chunk),
-                    vector=vector,
-                    payload={"text": chunk["text"], **chunk["metadata"]},
-                )
-                for chunk, vector in zip(batch, vectors, strict=True)
-            ]
-            self.client.upsert(
-                collection_name=self.settings.collection_name,
-                points=points,
-                wait=True,
-            )
-            print(f"Indexed {min(start + len(batch), len(chunks))}/{len(chunks)} chunks")
-
+        # Fetch point ids plus their schema version once. Existing schema-v2
+        # points are already embedded with the current metadata, so a re-run
+        # after an interruption only processes what is still missing.
+        all_versions = self._point_versions_by_source()
+        existing_versions: dict[str, dict[str, int | None]] = {
+            source: all_versions.get(source, {}) for source in point_ids_by_source
+        }
         for source, current_ids in point_ids_by_source.items():
-            obsolete_ids = self._source_point_ids(source) - current_ids
+            versions = existing_versions[source]
+            skipped = sum(
+                1 for point_id in current_ids if versions.get(point_id) == SCHEMA_VERSION
+            )
+            if skipped:
+                print(
+                    f"Skipping {skipped}/{len(current_ids)} chunks already indexed "
+                    f"for {source}",
+                    flush=True,
+                )
+
+        pending = [
+            chunk
+            for chunk in chunks
+            if existing_versions[str(chunk["metadata"]["source"])].get(
+                self._point_id(chunk)
+            )
+            != SCHEMA_VERSION
+        ]
+
+        # Embed in large groups (Gemini accepts many passages per request) but
+        # upsert in the configured batch size so progress is checkpointed often.
+        embed_group = max(batch_size, getattr(embeddings, "batch_size", batch_size))
+        done = len(chunks) - len(pending)
+        for start in range(0, len(pending), embed_group):
+            group = pending[start:start + embed_group]
+            vectors = embeddings.embed_documents([item["text"] for item in group])
+            for offset in range(0, len(group), batch_size):
+                batch = group[offset:offset + batch_size]
+                batch_vectors = vectors[offset:offset + batch_size]
+                points = [
+                    models.PointStruct(
+                        id=self._point_id(chunk),
+                        vector=vector,
+                        payload={
+                            "text": chunk["text"],
+                            **chunk["metadata"],
+                            "schemaVersion": SCHEMA_VERSION,
+                        },
+                    )
+                    for chunk, vector in zip(batch, batch_vectors, strict=True)
+                ]
+                call_with_retry(
+                    lambda: self.client.upsert(
+                        collection_name=self.settings.collection_name,
+                        points=points,
+                        wait=True,
+                    ),
+                    label="Qdrant upsert",
+                )
+                done += len(batch)
+                print(f"Indexed {done}/{len(chunks)} chunks", flush=True)
+
+        # Delete points that existed for a source but are no longer produced by
+        # the current file. Reuse the ids fetched above to avoid a second scroll.
+        for source, current_ids in point_ids_by_source.items():
+            obsolete_ids = set(existing_versions[source]) - current_ids
             if obsolete_ids:
-                self.client.delete(
-                    collection_name=self.settings.collection_name,
-                    points_selector=models.PointIdsList(points=list(obsolete_ids)),
-                    wait=True,
+                call_with_retry(
+                    lambda: self.client.delete(
+                        collection_name=self.settings.collection_name,
+                        points_selector=models.PointIdsList(points=list(obsolete_ids)),
+                        wait=True,
+                    ),
+                    label="Qdrant delete obsolete points",
                 )
 
         return len(chunks)
 
-    def _source_point_ids(self, source: str) -> set[str]:
-        point_ids: set[str] = set()
+    def _point_versions_by_source(self) -> dict[str, dict[str, int | None]]:
+        """Page through all points once, grouping ids by their source.
+
+        Filtering by `source` requires a keyword payload index that older
+        collections do not have, so this avoids `scroll_filter` entirely.
+        """
+        versions: dict[str, dict[str, int | None]] = {}
         offset = None
         while True:
-            points, offset = self.client.scroll(
-                collection_name=self.settings.collection_name,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="source",
-                            match=models.MatchValue(value=source),
-                        )
-                    ]
+            points, offset = call_with_retry(
+                lambda: self.client.scroll(
+                    collection_name=self.settings.collection_name,
+                    limit=512,
+                    with_payload=["source", "schemaVersion"],
+                    with_vectors=False,
+                    offset=offset,
                 ),
-                limit=256,
-                with_payload=False,
-                with_vectors=False,
-                offset=offset,
+                label="Qdrant scroll",
             )
-            point_ids.update(str(point.id) for point in points)
+            for point in points:
+                payload = point.payload or {}
+                source = payload.get("source")
+                if source is None:
+                    continue
+                version = payload.get("schemaVersion")
+                versions.setdefault(str(source), {})[str(point.id)] = (
+                    version if isinstance(version, int) else None
+                )
             if offset is None:
-                return point_ids
+                return versions
 
     def search(self, vector: list[float], limit: int = 8):
         return call_with_retry(
@@ -143,7 +215,7 @@ class QdrantStore:
                 collection_name=self.settings.collection_name,
                 query_vector=vector,
                 limit=limit,
-                with_payload=True,
+                with_payload=list(PAYLOAD_FIELDS),
             ),
             label="Qdrant search",
         )
