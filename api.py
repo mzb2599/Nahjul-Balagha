@@ -1,13 +1,16 @@
 from contextlib import asynccontextmanager
+from collections import OrderedDict
 from functools import lru_cache
 import logging
 import os
 import threading
 import time
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -61,6 +64,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 def _request_hosts(request: Request) -> set[str]:
@@ -174,6 +178,64 @@ def _warm_up_services() -> None:
         logger.warning(
             "RAG warm-up failed; the first Ask request will retry.", exc_info=True
         )
+
+
+# Counts and answers change rarely (the book index is static), so avoid an
+# extra Qdrant round trip on every question and reuse recent identical answers.
+_INDEX_CHECK_TTL_SECONDS = 30.0
+_INDEX_RECHECK_SECONDS = 5.0
+_ANSWER_CACHE_TTL_SECONDS = 600.0
+_ANSWER_CACHE_MAX_ENTRIES = 64
+
+_index_state_lock = threading.Lock()
+_index_checked_until = 0.0
+_index_ready = False
+
+_answer_cache: OrderedDict[
+    tuple[str, int | None, str | None, int], tuple[float, dict]
+] = OrderedDict()
+_answer_cache_lock = threading.Lock()
+
+
+def _index_available(store: Any) -> bool:
+    global _index_checked_until, _index_ready
+
+    now = time.monotonic()
+    with _index_state_lock:
+        if now < _index_checked_until:
+            return _index_ready
+
+    ready = store.count() > 0
+    with _index_state_lock:
+        _index_checked_until = time.monotonic() + (
+            _INDEX_CHECK_TTL_SECONDS if ready else _INDEX_RECHECK_SECONDS
+        )
+        _index_ready = ready
+    return ready
+
+
+def _cached_answer(key: tuple[str, int | None, str | None, int]) -> dict | None:
+    now = time.monotonic()
+    with _answer_cache_lock:
+        entry = _answer_cache.get(key)
+        if entry is None:
+            return None
+        expires, value = entry
+        if expires <= now:
+            _answer_cache.pop(key, None)
+            return None
+        _answer_cache.move_to_end(key)
+        return value
+
+
+def _store_answer(
+    key: tuple[str, int | None, str | None, int], value: dict
+) -> None:
+    with _answer_cache_lock:
+        _answer_cache[key] = (time.monotonic() + _ANSWER_CACHE_TTL_SECONDS, value)
+        _answer_cache.move_to_end(key)
+        while len(_answer_cache) > _ANSWER_CACHE_MAX_ENTRIES:
+            _answer_cache.popitem(last=False)
 
 
 def _warm_up_book() -> None:
@@ -319,9 +381,21 @@ def ask(request: AskRequest):
         raise HTTPException(status_code=422, detail="A question is required.")
     settings = get_settings()
     started = time.perf_counter()
+
+    cache_key = (
+        " ".join(question.lower().split()),
+        request.sectionId,
+        request.topicId,
+        settings.answer_limit,
+    )
+    cached = _cached_answer(cache_key)
+    if cached is not None:
+        logger.info("Answered question from cache in %.3fs.", time.perf_counter() - started)
+        return cached
+
     try:
         embeddings, store, model = get_rag_services()
-        if store.count() == 0:
+        if not _index_available(store):
             raise HTTPException(
                 status_code=503,
                 detail="The book index is empty. Run `python main.py --index` first.",
@@ -333,8 +407,11 @@ def ask(request: AskRequest):
             model,
             limit=settings.answer_limit,
             context=_reader_context(request),
+            section_id=request.sectionId,
+            topic_id=request.topicId,
             source_resolver=_resolve_source,
         )
+        _store_answer(cache_key, result)
         logger.info(
             "Answered question in %.1fs with %d sources.",
             time.perf_counter() - started,
